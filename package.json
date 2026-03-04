@@ -6,15 +6,21 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx ./scripts/migrate.ts",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@clerk/backend": "^3.0.1",
     "@clerk/nextjs": "^6.39.0",
     "@hono/clerk-auth": "^3.1.0",
     "@hono/zod-validator": "^0.7.6",
+    "@neondatabase/serverless": "^1.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.1",
+    "drizzle-zod": "^0.8.3",
     "hono": "^4.12.4",
     "lucide-react": "^0.576.0",
     "next": "16.1.6",
@@ -23,6 +29,7 @@
     "react-dom": "19.2.3",
     "react-use": "^17.6.0",
     "tailwind-merge": "^3.5.0",
+    "tsx": "^4.21.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -31,6 +38,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "dotenv": "^17.3.1",
+    "drizzle-kit": "^0.31.9",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "shadcn": "^3.8.5",

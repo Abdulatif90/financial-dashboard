@@ -10,28 +10,52 @@ import {
     SheetHeader,
     SheetDescription
 } from "@/components/ui/sheet"
-import { useCreateAccount } from "../api/use-create-account";
 import { useGetAccount } from "../api/use-get-account";
+import { useDeleteAccount } from "../api/use-delete-account";
+import { useEditAccount } from "../api/use-edit-account";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Loader2 } from "lucide-react";
 
 const formSchema = insertAccountSchema.pick({
     name: true,
 });
 
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = z.input<typeof formSchema>;
 
 export const EditAccountSheet = () => {
     const { isOpen, onClose, id } = useOpenAccount();
+
+    const [ConfirmDialog, confirm] = useConfirm(
+        "Are you sure?",
+        "You are about to delete this account."
+    );
+         
+
     const accountQuery = useGetAccount(id);
-    const mutation = useCreateAccount();
-    const isLoading = accountQuery.isLoading; 
+    const editMutation = useEditAccount(id);
+    const deleteMutation = useDeleteAccount(id);
+
+    const isPending = editMutation.isPending || deleteMutation.isPending; 
+    const isLoading = accountQuery.isLoading;
 
     const onSubmit = (values: FormValues) => {
-        mutation.mutate(values, {
+        editMutation.mutate(values, {
             onSuccess: () => {
                 onClose();
             },
         });
+    };
+
+    const onDelete = async () => {
+        const confirmed = await confirm();
+        if (confirmed) {
+            deleteMutation.mutate(
+                undefined,
+                {
+                    onSuccess: () => {  onClose(); },
+                }
+            );
+        }
     };
 
     const defaultValues = accountQuery.data ? 
@@ -39,30 +63,34 @@ export const EditAccountSheet = () => {
 
 
     return (
-        <Sheet open={isOpen} onOpenChange={onClose}>
-            <SheetContent className="space-y-4 p-4">
-                <SheetHeader className="flex flex-col items-center">
-                    <SheetTitle>
-                        Edit Account
-                    </SheetTitle>
-                <SheetDescription>
-                    Edit your account details.
-                </SheetDescription>
-                </SheetHeader>
-                {isLoading ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                        <Loader2 className="animate-spin size-4 text-muted-foreground" />
-                    </div>
-                ) : (
-                    <AccountForm 
-                        id={id}
-                        onSubmit={onSubmit}
-                        disabled={mutation.isPending}
-                        defaultValues={defaultValues}
-                    />
-                )}
-            </SheetContent>
-        </Sheet> 
+        <>
+        <ConfirmDialog />
+            <Sheet open={isOpen} onOpenChange={onClose}>
+                <SheetContent className="space-y-4 p-4">
+                    <SheetHeader className="flex flex-col items-center">
+                        <SheetTitle>
+                            Edit Account
+                        </SheetTitle>
+                    <SheetDescription>
+                        Edit your account details.
+                    </SheetDescription>
+                    </SheetHeader>
+                    {isLoading ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <Loader2 className="animate-spin size-4 text-muted-foreground" />
+                        </div>
+                    ) : (
+                        <AccountForm 
+                            id={id}
+                            onSubmit={onSubmit}
+                            disabled={isPending}
+                            defaultValues={defaultValues}
+                            onDelete={onDelete}
+                        />
+                    )}
+                </SheetContent>
+            </Sheet> 
+        </>
     );
 };           
 

@@ -70,7 +70,10 @@ export const AccountForm = ({
                         </FormItem>
                     )}
                 />
-                {onDelete && (
+                <Button type="submit" disabled={disabled} className="w-full">
+                    {id ? "Update Account" : "Create Account"}
+                </Button>
+                   {onDelete && (
                     <Button
                         type="button"
                         variant="destructive"
@@ -82,9 +85,6 @@ export const AccountForm = ({
                         Delete Account
                     </Button>
                 )}
-                <Button type="submit" disabled={disabled} className="w-full">
-                    {id ? "Update Account" : "Create Account"}
-                </Button>
             </form>
         </Form>
     );

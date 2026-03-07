@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react";
 import { z } from "zod";
 import { Trash } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -29,6 +30,10 @@ type Props = {
     disabled?: boolean;
 };
 
+const emptyDefaultValues: FormValues = {
+    name: "",
+};
+
 export const AccountForm = ({
     id,
     defaultValues,
@@ -36,10 +41,19 @@ export const AccountForm = ({
     onDelete,
     disabled,
 }: Props) => {
+    const mergedDefaultValues = useMemo(
+        () => ({ ...emptyDefaultValues, ...defaultValues }),
+        [defaultValues]
+    );
+
     const form = useForm<FormValues>({
         resolver: zodResolver(formSchema),
-        defaultValues: defaultValues || { name: "" },
+        defaultValues: mergedDefaultValues,
     });
+
+    useEffect(() => {
+        form.reset(mergedDefaultValues);
+    }, [form, mergedDefaultValues]);
 
     const handleSubmit = (values: FormValues) => {
         onSubmit(values);

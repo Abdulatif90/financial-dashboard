@@ -8,6 +8,18 @@ import {
 import { relations } from "drizzle-orm";
 import { z } from "zod";
 
+const nullableText = z.preprocess(
+    (value) => {
+        if (typeof value !== "string") {
+            return value;
+        }
+
+        const trimmedValue = value.trim();
+        return trimmedValue === "" ? null : trimmedValue;
+    },
+    z.string().trim().nullable().optional()
+);
+
 export const accounts = pgTable("accounts", {
     id: text("id").primaryKey(),
     plaidId: text("plaid_id"),
@@ -62,5 +74,12 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
 }));
 
 export const insertTransactionSchema = createInsertSchema(transactions, {
-    date: z.coerce.date(),
+    date: z.coerce.date().refine((value) => value <= new Date(), {
+        message: "Date cannot be in the future",
+    }),
+    accountId: z.string().trim().min(1, "Account is required"),
+    categoryId: nullableText,
+    payee: z.string().trim().min(1, "Payee is required"),
+    amount: z.number().finite(),
+    notes: nullableText,
 });

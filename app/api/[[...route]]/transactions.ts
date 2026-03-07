@@ -6,7 +6,7 @@ import { db } from "@/db/drizzle";
 import { eq, and, inArray, gte, lte, desc, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { transactions, insertTransactionSchema, categories, accounts } from "@/db/schema";
-import { subDays, parse} from "date-fns";
+import { parse } from "date-fns";
 
 
  
@@ -29,10 +29,8 @@ const app = new Hono()
             return c.json({ message: "Unauthorized" }, 401);
           }
 
-          const defaultTo = new Date();
-          const defaultFrom = subDays(defaultTo, 30);
-          const startDate = from ? parse(from, "yyyy-MM-dd", new Date()) : defaultFrom;
-          const endDate = to ? parse(to, "yyyy-MM-dd", new Date()) : defaultTo;
+          const startDate = from ? parse(from, "yyyy-MM-dd", new Date()) : undefined;
+          const endDate = to ? parse(to, "yyyy-MM-dd", new Date()) : undefined;
 
           const data = await db
             .select({
@@ -53,8 +51,8 @@ const app = new Hono()
             and(
               accountId ? eq(transactions.accountId, accountId) : undefined,
               eq(accounts.userId, auth.userId),
-              gte(transactions.date, startDate),
-              lte(transactions.date, endDate)
+              startDate ? gte(transactions.date, startDate) : undefined,
+              endDate ? lte(transactions.date, endDate) : undefined
             )
           )
           .orderBy(desc(transactions.date)

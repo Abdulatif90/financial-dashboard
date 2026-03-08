@@ -1,0 +1,51 @@
+date,account,category,payee,amount,notes
+2026-01-05,Main Checking,Salary,Acme Corp,3200,Monthly salary
+2026-01-06,Main Checking,Groceries,Korzinka,-48,Weekly groceries
+2026-01-06,Cash Wallet,Transport,Yandex Go,-6,Taxi fare
+2026-01-07,Main Checking,Utilities,Uzbektelecom,-22,Internet bill
+2026-01-08,Savings Account,Freelance,Upwork Client,480,Landing page project
+2026-01-08,Main Checking,Dining,Black Star Burger,-14,Dinner
+2026-01-09,Main Checking,Shopping,Uzum Market,-36,Home supplies
+2026-01-10,Cash Wallet,Entertainment,Cinema Palace,-9,Movie ticket
+2026-01-11,Main Checking,Transport,Metro Card,-3,Top up
+2026-01-12,Main Checking,Health,Apteka 999,-13,Medicine
+2026-01-13,Main Checking,Groceries,Carrefour,-41,Fruits and snacks
+2026-01-14,Savings Account,Interest,Bank Interest,18,Monthly interest
+2026-01-15,Main Checking,Rent,Landlord,-650,January rent
+2026-01-16,Main Checking,Utilities,Electricity,-28,Power bill
+2026-01-17,Cash Wallet,Dining,Coffee Bean,-5,Cappuccino
+2026-01-18,Main Checking,Freelance,Telegram Bot Client,250,Bot customization
+2026-01-18,Main Checking,Shopping,ZoodMall,-58,Office accessories
+2026-01-19,Main Checking,Transport,Yandex Go,-6,Airport trip
+2026-01-20,Main Checking,Groceries,Havas,-27,Groceries restock
+2026-01-21,Savings Account,Transfer,Transfer from Checking,300,Savings top up
+2026-01-22,Main Checking,Education,Udemy,-20,React course
+2026-01-23,Main Checking,Dining,EVOS,-9,Lunch
+2026-01-24,Main Checking,Utilities,Water Service,-11,Water bill
+2026-01-25,Cash Wallet,Entertainment,Steam,-15,Game purchase
+2026-01-26,Main Checking,Freelance,Figma Design Client,390,Dashboard redesign
+2026-01-27,Main Checking,Groceries,Macro,-52,Family groceries
+2026-01-28,Main Checking,Health,Dentist Clinic,-45,Dental cleaning
+2026-01-29,Main Checking,Transport,Petrol Station,-33,Fuel refill
+2026-01-30,Savings Account,Interest,Bank Interest,18,Monthly interest
+2026-01-31,Main Checking,Shopping,Artel Store,-120,Small appliance
+2026-02-01,Main Checking,Salary,Acme Corp,3200,Monthly salary
+2026-02-02,Main Checking,Groceries,Korzinka,-44,Groceries
+2026-02-03,Cash Wallet,Dining,Les Ailes,-8,Quick lunch
+2026-02-04,Main Checking,Utilities,Uzbektelecom,-22,Internet bill
+2026-02-05,Savings Account,Freelance,Shopify Client,540,Ecommerce fixes
+2026-02-06,Main Checking,Shopping,Uzum Market,-25,Phone accessories
+2026-02-07,Main Checking,Transport,Yandex Go,-5,City ride
+2026-02-08,Main Checking,Entertainment,Spotify,-3,Monthly subscription
+2026-02-09,Main Checking,Health,Gym Membership,-35,Monthly gym fee
+2026-02-10,Main Checking,Groceries,Carrefour,-40,Groceries
+2026-02-11,Cash Wallet,Dining,Coffee Bean,-4,Latte
+2026-02-12,Main Checking,Education,Book Store,-17,Finance book
+2026-02-13,Main Checking,Rent,Landlord,-650,February rent
+2026-02-14,Savings Account,Gift,Family Gift,120,Birthday gift received
+2026-02-15,Main Checking,Utilities,Electricity,-30,Power bill
+2026-02-16,Main Checking,Freelance,Mobile App Client,610,UI polish work
+2026-02-17,Main Checking,Transport,Metro Card,-3,Top up
+2026-02-18,Main Checking,Groceries,Havas,-31,Fresh groceries
+2026-02-19,Cash Wallet,Entertainment,Bowling Club,-18,Weekend outing
+2026-02-20,Main Checking,Shopping,Local Market,-27,Household items

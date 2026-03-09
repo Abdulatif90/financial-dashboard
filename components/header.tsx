@@ -1,13 +1,18 @@
-    
-import { UserButton } from "@clerk/nextjs";
-import { ClerkLoaded, ClerkLoading } from "@clerk/nextjs";
+"use client";
+
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
+import Link from "next/link";
 import { HeaderLogo } from "@/components/header-logo";
 import { Navigation } from "@/components/navigation";
 import { WelcomeMsg } from "@/components/welcome-msg";
 import { Filters } from "@/components/filters";
+import { Button } from "@/components/ui/button";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 
 export const Header = () => {
+    const isMounted = useIsMounted();
+
     return (
         <header className="bg-linear-to-b from-blue-700 to-blue-500 px-4 py-8 lg:px-14 pb-36">
             <div className="max-w-screen-2xl mx-auto">  
@@ -16,12 +21,29 @@ export const Header = () => {
                         <HeaderLogo />
                         <Navigation />
                     </div>
-                    <ClerkLoaded>
-                        <UserButton afterSignOutUrl="/" />
-                    </ClerkLoaded>
-                    <ClerkLoading>
+                    {isMounted ? (
+                        <>
+                            <SignedIn>
+                                <UserButton afterSignOutUrl="/" />
+                            </SignedIn>
+                            <SignedOut>
+                                <div className="flex items-center gap-2">
+                                    <Button asChild variant="ghost" className="text-white hover:bg-white/10 hover:text-white">
+                                        <Link href="/sign-in">
+                                            Sign in
+                                        </Link>
+                                    </Button>
+                                    <Button asChild className="bg-white text-blue-700 hover:bg-blue-50">
+                                        <Link href="/sign-up">
+                                            Sign up
+                                        </Link>
+                                    </Button>
+                                </div>
+                            </SignedOut>
+                        </>
+                    ) : (
                         <Loader2 className="size-8 animate-spin text-slate-400" />
-                    </ClerkLoading>
+                    )}
                 </div>
                 <WelcomeMsg />
                 <Filters/>

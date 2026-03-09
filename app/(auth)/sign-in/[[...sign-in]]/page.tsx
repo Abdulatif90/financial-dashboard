@@ -16,7 +16,11 @@ export default function Page() {
       </div>
       <div className="flex items-center justify-center mt-8">
         <ClerkLoaded>
-          <SignIn/>
+          <SignIn
+            signUpUrl="/sign-up"
+            fallbackRedirectUrl="/"
+            forceRedirectUrl="/"
+          />
         </ClerkLoaded>
         <ClerkLoading>
           <Loader2/>

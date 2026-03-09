@@ -4,12 +4,16 @@ import { zValidator }  from "@hono/zod-validator";
 import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
 import { categories, insertCategorySchema } from "@/db/schema";
 import { db } from "@/db/drizzle";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
 
  
 
+
+const categoryNameSchema = z.object({
+  name: insertCategorySchema.shape.name.pipe(z.string().trim().min(1, "Name is required")),
+});
 
 const app = new Hono()
     .get("/",
@@ -64,19 +68,35 @@ const app = new Hono()
     )
     .post("/",
       clerkMiddleware(),
-      zValidator("json", insertCategorySchema.pick({
-          name: true,
-})),
+      zValidator("json", categoryNameSchema),
         async (c) => {
           const auth = getAuth(c);
           const values = c.req.valid("json")
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const normalizedName = values.name.trim().toLowerCase();
+
+          const [existingCategory] = await db
+            .select()
+            .from(categories)
+            .where(
+              and(
+                eq(categories.userId, auth.userId),
+                sql`lower(trim(${categories.name})) = ${normalizedName}`
+              )
+            )
+            .limit(1);
+
+          if (existingCategory) {
+            return c.json({ data: existingCategory });
+          }
+
           const [data] = await db.insert(categories).values({
             id: createId(),
             userId: auth.userId,
-            ...values,
+            name: values.name.trim(),
           })
           .returning();
 
@@ -115,9 +135,7 @@ const app = new Hono()
       "/:id",
       clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
-      zValidator("json", insertCategorySchema.pick({
-        name: true,
-      })),
+      zValidator("json", categoryNameSchema),
       async (c) => {
         const auth = getAuth(c);
         const { id } = c.req.valid("param");
@@ -132,7 +150,9 @@ const app = new Hono()
 
         const [data] = await db
           .update(categories)
-          .set(values)
+          .set({
+            name: values.name.trim(),
+          })
           .where(
             and(
               eq(categories.userId, auth.userId),

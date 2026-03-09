@@ -106,6 +106,24 @@ const getCsvValue = (row: CsvRow, aliases: string[]) => {
 
 const normalizeName = (value: string) => value.trim().toLowerCase();
 
+const getResponseErrorMessage = async (response: Response, fallbackMessage: string) => {
+    try {
+        const payload = await response.json();
+
+        if (typeof payload?.message === "string" && payload.message.trim()) {
+            return payload.message;
+        }
+
+        if (typeof payload?.error === "string" && payload.error.trim()) {
+            return payload.error;
+        }
+    } catch {
+        // Ignore non-JSON error responses and fall back to the default message.
+    }
+
+    return fallbackMessage;
+};
+
 const parseCsvAmount = (value: string) => {
     const sanitizedValue = value.replace(/[$,\s]/g, "");
     const normalizedValue = sanitizedValue.startsWith("(") && sanitizedValue.endsWith(")")
@@ -117,7 +135,7 @@ const parseCsvAmount = (value: string) => {
         throw new Error(`Invalid amount: ${value}`);
     }
 
-    return parsedAmount;
+    return Math.round(parsedAmount * 100);
 };
 
 const parseCsvDate = (value: string) => {
@@ -343,7 +361,12 @@ const TransactionsPageContent = () => {
                     });
 
                     if (!response.ok) {
-                        throw new Error(`Failed to create account \"${row.normalized.accountName}\".`);
+                        throw new Error(
+                            await getResponseErrorMessage(
+                                response,
+                                `Failed to create account \"${row.normalized.accountName}\".`
+                            )
+                        );
                     }
 
                     const { data } = await response.json();
@@ -363,7 +386,12 @@ const TransactionsPageContent = () => {
                         });
 
                         if (!response.ok) {
-                            throw new Error(`Failed to create category \"${row.normalized.categoryName}\".`);
+                            throw new Error(
+                                await getResponseErrorMessage(
+                                    response,
+                                    `Failed to create category \"${row.normalized.categoryName}\".`
+                                )
+                            );
                         }
 
                         const { data } = await response.json();

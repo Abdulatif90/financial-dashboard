@@ -4,12 +4,16 @@ import { zValidator }  from "@hono/zod-validator";
 import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
 import { accounts, insertAccountSchema } from "@/db/schema";
 import { db } from "@/db/drizzle";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
 
  
 
+
+const accountNameSchema = z.object({
+  name: insertAccountSchema.shape.name.pipe(z.string().trim().min(1, "Name is required")),
+});
 
 const app = new Hono()
     .get("/",
@@ -64,19 +68,35 @@ const app = new Hono()
     )
     .post("/",
       clerkMiddleware(),
-      zValidator("json", insertAccountSchema.pick({
-          name: true,
-})),
+      zValidator("json", accountNameSchema),
         async (c) => {
           const auth = getAuth(c);
           const values = c.req.valid("json")
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const normalizedName = values.name.trim().toLowerCase();
+
+          const [existingAccount] = await db
+            .select()
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                sql`lower(trim(${accounts.name})) = ${normalizedName}`
+              )
+            )
+            .limit(1);
+
+          if (existingAccount) {
+            return c.json({ data: existingAccount });
+          }
+
           const [data] = await db.insert(accounts).values({
             id: createId(),
             userId: auth.userId,
-            ...values,
+            name: values.name.trim(),
           })
           .returning();
 
@@ -115,9 +135,7 @@ const app = new Hono()
       "/:id",
       clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
-      zValidator("json", insertAccountSchema.pick({
-        name: true,
-      })),
+      zValidator("json", accountNameSchema),
       async (c) => {
         const auth = getAuth(c);
         const { id } = c.req.valid("param");
@@ -132,7 +150,9 @@ const app = new Hono()
 
         const [data] = await db
           .update(accounts)
-          .set(values)
+          .set({
+            name: values.name.trim(),
+          })
           .where(
             and(
               eq(accounts.userId, auth.userId),

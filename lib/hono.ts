@@ -1,5 +1,5 @@
 import { hc } from "hono/client"
-import { AppType } from "@/app/api/[[...route]]/route"
+import { AppType } from "@/app/api/[[...route]]/app"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 if (!API_URL) { 

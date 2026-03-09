@@ -1,5 +1,5 @@
 import { useOpenTransaction } from "@/features/transactions/hooks/use-open-transaction";
-import { TransactionForm } from "@/features/transactions/components/transaction-form";
+import { TransactionForm, type TransactionFormValues } from "@/features/transactions/components/transaction-form";
 
 import { 
     Sheet,
@@ -86,21 +86,21 @@ export const EditTransactionSheet = () => {
         }
     };
 
-    const defaultValues = transactionQuery.data ? 
+    const defaultValues: TransactionFormValues = transactionQuery.data ? 
     { 
         date: new Date(transactionQuery.data.date),
         accountId: transactionQuery.data.accountId,
-        categoryId: transactionQuery.data.categoryId,
+        categoryId: transactionQuery.data.categoryId ?? null,
         payee: transactionQuery.data.payee,
         amount: transactionQuery.data.amount,
-        notes: transactionQuery.data.notes
+        notes: transactionQuery.data.notes ?? null,
     } : { 
-        date: "",
+        date: new Date(),
         accountId: "",
-        categoryId: "",
+        categoryId: null,
         payee: "",
         amount: 0,
-        notes: ""
+        notes: null,
     };
 
 

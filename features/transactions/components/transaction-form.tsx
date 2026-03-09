@@ -7,7 +7,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Select } from "@/components/select";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/date-picker";
-import {  insertTransactionSchema } from "@/db/schema";
 import { Textarea } from "@/components/ui/textarea";
 import { AmountInput } from "@/components/amount-input";
 import {
@@ -19,21 +18,23 @@ import {
     FormMessage 
 } from "@/components/ui/form";
 
-const formSchema =z.object({
-    date: z.coerce.date(),
-    accountId: z.string(),
-    categoryId: z.string().nullable().optional(),
-    payee: z.string(),
-    amount: z.number(),
-    notes: z.string().nullable().optional(),
+const formSchema = z.object({
+    date: z.date().refine((value) => value <= new Date(), {
+        message: "Date cannot be in the future",
+    }),
+    accountId: z.string().trim().min(1, "Account is required"),
+    categoryId: z.string().trim().nullable().optional(),
+    payee: z.string().trim().min(1, "Payee is required"),
+    amount: z.number().finite(),
+    notes: z.string().trim().nullable().optional(),
 });
 
-type FormValues = z.input<typeof formSchema>;
+export type TransactionFormValues = z.output<typeof formSchema>;
 
 type Props = {
     id?: string;
-    defaultValues?: FormValues;
-    onSubmit: (values: FormValues) => void;
+    defaultValues?: TransactionFormValues;
+    onSubmit: (values: TransactionFormValues) => void;
     onDelete?: () => void;
     disabled?: boolean;
     accountOptions: { label: string; value: string }[];
@@ -42,7 +43,7 @@ type Props = {
     onCreateCategory: (name: string) => void;
 };
 
-const emptyDefaultValues: FormValues = {
+const emptyDefaultValues: TransactionFormValues = {
     date: new Date(),
     accountId: "",
     categoryId: null,
@@ -67,7 +68,7 @@ export const TransactionForm = ({
         [defaultValues]
     );
 
-    const form = useForm<FormValues>({
+    const form = useForm<TransactionFormValues>({
         resolver: zodResolver(formSchema),
         defaultValues: mergedDefaultValues,
     });
@@ -76,7 +77,7 @@ export const TransactionForm = ({
         form.reset(mergedDefaultValues);
     }, [form, mergedDefaultValues]);
 
-    const handleSubmit = (values: FormValues) => {
+    const handleSubmit = (values: TransactionFormValues) => {
         onSubmit(values);
     }
 
@@ -97,7 +98,7 @@ export const TransactionForm = ({
                             <FormLabel>Date</FormLabel>
                             <FormControl>
                                 <DatePicker
-                                    value={field.value as Date | undefined}
+                                    value={field.value}
                                     onChange={field.onChange}
                                     disable={disabled}
                                     disabledDates={{ after: new Date() }}

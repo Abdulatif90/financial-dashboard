@@ -1,7 +1,5 @@
-import { z } from "zod";
-import { useNewTransaction } from "@/features/transactions/hooks/use-new-transaction";
-import { insertTransactionSchema } from "@/db/schema";
 import { Loader2 } from "lucide-react";
+import { useNewTransaction } from "@/features/transactions/hooks/use-new-transaction";
 
 import { 
     Sheet,
@@ -10,18 +8,12 @@ import {
     SheetHeader,
     SheetDescription
 } from "@/components/ui/sheet"
-import { useCreateTransaction } from "@/features/transactions/api/use-create-transaction";
+import { useCreateTransaction, type CreateTransactionRequest } from "@/features/transactions/api/use-create-transaction";
 import { useCreateCategory } from "@/features/categories/api/use-create-category";
 import { useGetCategories } from "@/features/categories/api/use-get-categories";
 import { useCreateAccount } from "@/features/accounts/api/use-create-account";
 import { useGetAccounts } from "@/features/accounts/api/use-get-accounts";
-import { TransactionForm } from "@/features/transactions/components/transaction-form";
-
-const formSchema = insertTransactionSchema.omit({
-    id: true,
-});
-
-type FormValues = z.input<typeof formSchema>;
+import { TransactionForm, type TransactionFormValues } from "@/features/transactions/components/transaction-form";
 
 export const NewTransactionSheet = () => {
     const { isOpen, onClose } = useNewTransaction();
@@ -51,8 +43,17 @@ export const NewTransactionSheet = () => {
     categoryQuery.isLoading ||
     accountQuery.isLoading;
 
-    const onSubmit = (values: FormValues) => {
-        createMutation.mutate(values, {
+    const onSubmit = (values: TransactionFormValues) => {
+        const payload: CreateTransactionRequest = {
+            date: values.date,
+            amount: values.amount,
+            payee: values.payee,
+            accountId: values.accountId,
+            notes: values.notes ?? null,
+            categoryId: values.categoryId ?? null,
+        };
+
+        createMutation.mutate(payload, {
             onSuccess: () => {
                 onClose();
             },

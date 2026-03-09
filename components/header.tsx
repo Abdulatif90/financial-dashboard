@@ -3,6 +3,7 @@
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { HeaderLogo } from "@/components/header-logo";
 import { Navigation } from "@/components/navigation";
 import { WelcomeMsg } from "@/components/welcome-msg";
@@ -46,7 +47,9 @@ export const Header = () => {
                     )}
                 </div>
                 <WelcomeMsg />
-                <Filters/>
+                <Suspense fallback={<div className="mt-8 h-9" />}>
+                    <Filters/>
+                </Suspense>
             </div>
         </header>
     )

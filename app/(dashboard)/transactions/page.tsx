@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import type { ParseError, ParseResult } from "papaparse";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -233,7 +233,7 @@ const buildImportPreview = (
     };
 };
 
-const TransactionsPage = () => {
+const TransactionsPageContent = () => {
     const [isImporting, setIsImporting] = useState(false);
     const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
     const [lastImportSummary, setLastImportSummary] = useState<ImportSummary | null>(null);
@@ -608,6 +608,14 @@ const TransactionsPage = () => {
         </Card>
     </div>
   );
+};
+
+const TransactionsPage = () => {
+    return (
+        <Suspense fallback={null}>
+            <TransactionsPageContent />
+        </Suspense>
+    );
 };
 
 export default TransactionsPage;

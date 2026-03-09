@@ -1,4 +1,3 @@
-import { IconType } from "react-icons";
 import { 
     Card,
     CardContent,
@@ -9,6 +8,7 @@ import {
 import { cva, VariantProps } from "class-variance-authority";
 import { cn, formatCurrency, formatPercentage } from "@/lib/utils";
 import { CountUp } from "@/components/count-up";
+import { FaArrowTrendDown, FaArrowTrendUp, FaMinus } from "react-icons/fa6";
 import { Skeleton } from "./ui/skeleton";
 
 
@@ -53,22 +53,41 @@ interface DataCardProps extends BoxVariants, IconVariants {
     title: string;
     value?: number;
     percentage?: number;
-    icon: IconType;
     dataRange: string;
     trend?: "default" | "inverse";
 }
 
+type Tone = "default" | "success" | "danger";
+
 export const DataCard = ({
-    icon: Icon,
     title,
     value=0,
     percentage=0,
     dataRange,
-    variant,
     trend = "default",
 }: DataCardProps) => {
     const isPositive = percentage > 0;
     const isNegative = percentage < 0;
+    const isNeutral = percentage === 0;
+    const isImproved = trend === "inverse" ? isNegative : isPositive;
+
+    const tone: Tone = isNeutral
+        ? "default"
+        : isImproved
+        ? "success"
+        : "danger";
+
+    const descriptionToneClass = tone === "success"
+        ? "text-emerald-500"
+        : tone === "danger"
+        ? "text-rose-500"
+        : "text-muted-foreground";
+
+    const TrendIcon = isNeutral
+        ? FaMinus
+        : isPositive
+        ? FaArrowTrendUp
+        : FaArrowTrendDown;
 
     return (
         <Card className="border-none drop-shadow-sm" >
@@ -82,10 +101,10 @@ export const DataCard = ({
                     </CardDescription>
                 </div>
                 <div className={cn(
-                boxVariant({ variant }),
+                boxVariant({ variant: tone }),
                 )} >
-                <Icon className={cn(
-                    iconVariant({ variant }),
+                <TrendIcon className={cn(
+                    iconVariant({ variant: tone }),
                     )} /> 
                 </div>
             </CardHeader>
@@ -101,11 +120,8 @@ export const DataCard = ({
                     />
                 </h1>
                 <p className={cn(
-                    "text-muted-foreground text-sm line-clamp-1", 
-                    trend === "default" && isPositive && "text-emerald-500",
-                    trend === "default" && isNegative && "text-rose-500",
-                    trend === "inverse" && isPositive && "text-rose-500",
-                    trend === "inverse" && isNegative && "text-emerald-500"
+                    "text-sm line-clamp-1",
+                    descriptionToneClass,
                 )} >
                  {formatPercentage(percentage, { addPrefix: true })} from last period
                 </p>

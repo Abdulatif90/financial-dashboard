@@ -31,14 +31,24 @@ const app = new Hono()
       return c.json({ error: "Unauthorized" }, 401);
     }
     const defaultTo = new Date();
-    const defaultFrom = subDays(defaultTo, 30);
+    const defaultFrom = subDays(defaultTo, 29);
 
-    const startDate = from
+    let startDate = from
         ? parse(from, "yyyy-MM-dd", new Date())
         : defaultFrom;
-    const endDate = to
+    let endDate = to
         ? parse(to, "yyyy-MM-dd", new Date())
         : defaultTo;
+
+        if (startDate > endDate) {
+            const temp = startDate;
+            startDate = endDate;
+            endDate = temp;
+        }
+
+        if (differenceInDays(endDate, startDate) + 1 > 30) {
+            startDate = subDays(endDate, 29);
+        }
 
         const periodLength = differenceInDays(endDate, startDate) + 1;
         const lastPeriodStart = subDays(startDate, periodLength);

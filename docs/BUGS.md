@@ -269,13 +269,72 @@ instead of the hardcoded `null`.
 asserts the route calls `eq(connectedBanks.userId, "user_me")` and returns
 `connected: false`/`true` correctly depending on row presence.
 
-### BUG-011 🔴 No transaction sync/import endpoint
-**Verified.** `app/api/[[...route]]/plaid.ts` only has `create-link-token` and
+### BUG-011 🟢 Fixed 2026-08-08 — No transaction sync/import endpoint
+**Verified.** `app/api/[[...route]]/plaid.ts` only had `create-link-token` and
 `exchange-public-token`. README.md claims "Import transactions automatically" / "Sync
-financial data" — no `transactionsSync` call or endpoint backs that claim anywhere in the repo.
-**Deliberately out of scope for the BUG-009/010/012/013 dispatch** — requires new design
-decisions (mapping Plaid accounts/categories onto local rows, a sync cursor column) that
-dispatch's prompt explicitly did not resolve. Still open.
+financial data" — no `transactionsSync` call or endpoint backed that claim anywhere in the repo.
+Deliberately out of scope for the BUG-009/010/012/013 dispatch (it needed design decisions
+that dispatch's prompt didn't resolve); a first attempt at it then died on a session usage
+limit, landing two pieces before it stopped:
+- `lib/plaid-mapping.ts` (commit `1790bae`) — pure Plaid→local mapping helpers.
+- `connectedBanks.cursor` (`text("cursor")`, nullable — NULL = never synced), commit
+  `3575513`, migration `drizzle/0009_mysterious_namorita.sql`, already applied to the live DB.
+
+**Fix applied** (built *on top of* those two, neither was recreated):
+- **`POST /api/plaid/sync`** (`plaid.ts`) — ownership-scoped select of the caller's
+  `connected_banks` rows (`eq(connectedBanks.userId, auth.userId)`), 404 if none. For each
+  row it loops `client.transactionsSync({ access_token, cursor })` until `has_more` is false
+  (Plaid paginates; stopping after one page silently drops transactions), bounded at 100 pages
+  so a misbehaving response can't spin the request forever.
+- **Account find-or-create**: first real use of the previously-unused `accounts.plaid_id`
+  column. Looks up `and(eq(accounts.userId, auth.userId), eq(accounts.plaidId, account_id))`;
+  inserts `{ plaidId, name: plaidAccountName(...), userId }` when missing. Every Plaid account
+  referenced by a page (`accounts[]`, plus any account referenced only by a transaction) is
+  resolved *before* that page's transactions, since `transactions.account_id` is `NOT NULL`.
+- **Category find-or-create**: same shape, keyed on
+  `plaidCategoryKey(transaction)` (`personal_finance_category.primary`) with
+  `name = titleCasePlaidCategory(key)`. A `null` key (Plaid didn't classify it) means
+  `categoryId: null` — no invented category.
+- Both find-or-creates catch Postgres `23505` from BUG-005's
+  `UNIQUE (user_id, lower(trim(name)))` index — a user who already has a manually-created
+  "Groceries" adopts that row (and gets its `plaid_id` backfilled if it was null) instead of a
+  500.
+- **Upsert**: `db.insert(transactions).values(mapPlaidTransaction(...)).onConflictDoUpdate({
+  target: transactions.id, set: {...} })`. Plaid's `transaction_id` is reused as our primary
+  key, which is what makes re-syncing (and Plaid's `modified` list) idempotent. `notes` is
+  deliberately **excluded** from the update `set` — it's user-entered and Plaid has nothing to
+  put there.
+- **Deletes**: for each `removed` entry, `delete ... where and(eq(transactions.id, ...),
+  inArray(transactions.accountId, <the caller's account ids>))`. `transactions` has no
+  `user_id` of its own, so the account-id restriction is what stops a `transaction_id` from
+  another user's Item deleting our rows.
+- **Cursor persisted page-by-page**, not once at the end, so a failure on page 4 of 7 doesn't
+  discard pages 1-3.
+- **Plaid errors don't 500**: `transactionsSync` is wrapped in try/catch; a revoked/invalid
+  `access_token` returns `502 { error: "Failed to sync transactions with Plaid" }`.
+- Returns `{ data: { added, modified, removed, accountsCreated, categoriesCreated } }`.
+- **Frontend**: `features/plaid/api/use-sync-transactions.ts` (mutation hook, same structure as
+  `use-disconnect-bank.ts`) invalidates `["transactions"]`, `["summary"]`, `["accounts"]` and
+  `["categories"]` on success — a sync can create accounts/categories, not just transactions.
+  `settings-card.tsx` shows a "Sync transactions" button next to "Disconnect" when connected.
+**Test:** `lib/plaid-mapping.test.ts` (13 new tests) pins the mapping, above all the amount
+sign convention in **both** directions — a Plaid purchase `12.34` → `-1234` cents, a Plaid
+refund `-12.34` → `+1234` cents — plus the float-rounding case (`8.7` → `-870`, not
+`-869.9999999999999`, which `insertTransactionSchema`'s integer check would reject).
+`plaid.ownership.test.ts` gains 6 `/sync` tests on the existing mocked-db + spied-`eq` +
+mocked-`PlaidApi` pattern (`transactionsSync` mocked alongside `itemRemove` — no test calls
+Plaid's real API): 404-without-calling-Plaid when nothing is connected; ownership-scoped
+find-or-create asserting `eq(accounts.userId, "user_me")` / `eq(categories.userId, "user_me")`
+and that the inserted rows carry the caller's `userId`, with the sign flip asserted
+end-to-end through the route (`-1234` reaches `.values()`); the refund direction; cursor
+replay + per-page persistence across two pages; delete restricted via
+`inArray(transactions.accountId, ["local_acc_1"])`; and the 502-not-500 Plaid-failure path.
+The mocked `db` proxy now records its method calls, so tests can assert *what* was written,
+not just that a write happened.
+**Verified:** `npx tsc --noEmit` clean, `npx vitest run` → 37/37 (18 pre-existing + 19 new),
+`npx eslint .` → 0 errors / 1 warning (the pre-existing `data-table.tsx` one). No live Plaid
+call and no live DB write was made as part of this work — everything is proven through mocks,
+per the dispatch's constraints.
 
 ### BUG-012 🟢 Fixed 2026-08-08 — No disconnect/unlink-bank flow
 **Verified.** No delete/unlink endpoint or UI action existed for `connectedBanks` rows.

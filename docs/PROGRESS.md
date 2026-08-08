@@ -5,25 +5,23 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-009/010/012/013 fixed and reviewed (accepted, `/tekshir-finance`); BUG-021
-found+fixed via actually running `npm run dev` for the first time this session; BUG-011+014
-dispatch **failed** (subagent hit its session usage limit, resets 9:50pm Asia/Seoul) —
-retry needed.
+2026-08-08 — **BUG-011 fixed** (retry dispatch, built on the two artifacts the failed first
+attempt left behind): `POST /api/plaid/sync`, account/category find-or-create, upsert/delete
+loop, frontend wiring, 19 new tests. Every Plaid bug (BUG-009..BUG-014) is now 🟢. Earlier the
+same day: BUG-009/010/012/013 fixed and reviewed (accepted, `/tekshir-finance`); BUG-021
+found+fixed via actually running `npm run dev`; BUG-014 fixed directly.
 
 ## Current phase
-**Phase 3 — Re-audit + README** is done. BUG-009/010/012/013 are fixed and independently
-reviewed (see the `/tekshir-finance` review below — accepted, no deviations). BUG-021 (a real
-runtime bug, not caught by `tsc`/`vitest`/`eslint`) was found and fixed while verifying
-`npm run dev`. **BUG-011 + BUG-014 were dispatched together but the builder subagent failed**
-("Agent terminated early due to an API error: You've hit your session limit · resets 9:50pm
-(Asia/Seoul)") — before failing it did produce one real, usable artifact:
-`lib/plaid-mapping.ts` (untracked, uncommitted) — pure Plaid-transaction-to-local-schema
-mapping helpers (`plaidAmountToCents`, `mapPlaidTransaction`, `titleCasePlaidCategory`,
-`plaidAccountName`), reviewed and correct (amount sign-flip verified against the spec: a $12
-Plaid purchase (`12`) maps to `-1200`, matching this app's expense convention). No route
-wiring, no tests, nothing committed yet. **The retry dispatch must reuse this file, not
-redo it** — see "Next". What's left otherwise: the CV/portfolio text update ("audited" ->
-"fixed", not actionable from this repo).
+**Phase 3 — Re-audit + README** is done, and **every tracked code bug is now 🟢** — the whole
+Plaid block (BUG-009..BUG-014) included. BUG-009/010/012/013 were fixed and independently
+reviewed (`/tekshir-finance` — accepted, no deviations); BUG-021 (a real runtime bug none of
+`tsc`/`vitest`/`eslint` catch) was found and fixed while verifying `npm run dev`; BUG-014 was
+fixed directly. **BUG-011 is now fixed too**, by a retry dispatch after the first attempt died
+on a session usage limit — the retry built on the two artifacts that attempt had already
+committed (`lib/plaid-mapping.ts` and `connectedBanks.cursor`) rather than redoing them.
+What's left: the CV/portfolio text update ("audited" -> "fixed", not actionable from this
+repo), and a first real end-to-end run of the sync against Plaid's sandbox (everything so far
+is mock-proven only — see "Next").
 
 ## Done
 - Full code audit against a mentor's prioritized review; verified each claim against the
@@ -202,31 +200,61 @@ redo it** — see "Next". What's left otherwise: the CV/portfolio text update ("
   (`sandbox`/`production` — checked the installed SDK directly, this version has no
   `development` key), defaulting to `sandbox`. Verified `tsc`/`vitest`/`eslint` clean.
 - Committed: `c81a536`/`e4cba7c`/`9dfdc46`/`f172caf` (BUG-009/010/012/013), `1790bae`
-  (BUG-021 + salvaged `lib/plaid-mapping.ts`) — the BUG-014 fix is the next commit to land.
+  (BUG-021 + salvaged `lib/plaid-mapping.ts`), `48b34ea` (BUG-014), `3575513` (cursor column),
+  `a29b2ee` (docs correction).
+- **BUG-011 fixed** (retry dispatch, 2026-08-08). Built on the two artifacts the failed first
+  attempt left behind — `lib/plaid-mapping.ts` and `connectedBanks.cursor` — neither was
+  recreated, no migration regenerated, and `plaid-mapping.ts`'s exported signatures are
+  untouched:
+  - `POST /api/plaid/sync` (`plaid.ts`): ownership-scoped `connected_banks` select, 404 if the
+    caller has nothing connected, then `client.transactionsSync` looped until `has_more` is
+    false (bounded at 100 pages), persisting `next_cursor` to `connected_banks.cursor` **after
+    every page** rather than once at the end.
+  - Account find-or-create on `(user_id, plaid_id)` — the first real use of `accounts.plaid_id`
+    — resolved for every account a page references *before* its transactions (account_id is
+    NOT NULL). Category find-or-create on `(user_id, plaid_id = personal_finance_category
+    .primary)`; an unclassified transaction gets `categoryId: null`, not an invented category.
+    Both catch Postgres `23505` from BUG-005's unique-name index and adopt the existing
+    same-name row (backfilling its `plaid_id`) instead of 500ing.
+  - Upsert via `.onConflictDoUpdate({ target: transactions.id, ... })` — Plaid's
+    `transaction_id` is our PK, so re-sync and Plaid's `modified` list are idempotent. `notes`
+    excluded from the update set (user-entered; Plaid has nothing to put there).
+  - `removed` entries deleted with the id **plus** `inArray(transactions.accountId, <the
+    caller's account ids>)` — `transactions` has no `user_id`, so that restriction is the
+    ownership guard.
+  - Plaid failures (revoked token etc.) return `502` with a clear message instead of an
+    unhandled 500.
+  - Frontend: `features/plaid/api/use-sync-transactions.ts` + a "Sync transactions" button in
+    `settings-card.tsx` next to "Disconnect"; invalidates `["transactions"]`, `["summary"]`,
+    `["accounts"]`, `["categories"]`.
+  - Tests: `lib/plaid-mapping.test.ts` (13, incl. the sign convention asserted **both** ways —
+    Plaid `12.34` → `-1234`, Plaid `-12.34` → `+1234` — and the float-rounding case `8.7` →
+    `-870`) and 6 new `/sync` tests in `plaid.ownership.test.ts` (`transactionsSync` mocked
+    like `itemRemove`; ownership `eq` calls asserted; sign flip asserted end-to-end through the
+    route; cursor replay/per-page persistence; delete scoping; 502-not-500). The mocked `db`
+    proxy now records method calls so tests can assert what was written.
+  - Verified: `npx tsc --noEmit` clean, `npx vitest run` → **37/37** (18 pre-existing + 19
+    new), `npx eslint .` → 0 errors / 1 warning (pre-existing `data-table.tsx`). No live Plaid
+    call, no live DB write.
+  - Commits: `6c70170` (endpoint), `05c6250` (frontend), `ad44ea1` (tests), plus this docs
+    update.
 
 ## Not done yet
-- BUG-011 (transaction sync/import) — design decisions already made and verified against
-  Plaid's real API. **Correction**: the failed dispatch made more progress than its cut-off
-  final report suggested — it also committed `3575513` (`cursor: text("cursor")` added to
-  `connected_banks`, migration `drizzle/0009_mysterious_namorita.sql` generated + applied,
-  independently re-verified against the live DB: column exists, nullable, table still 0
-  rows) before hitting the session limit. So both `lib/plaid-mapping.ts` AND the `cursor`
-  column already exist — only the `/sync` endpoint, frontend wiring, and tests remain.
 - `components/data-table.tsx`'s React Compiler "incompatible library" warning
   (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
 - CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item) — not
   actionable from this repo, no CV file exists here
 
 ## Next
-1. **Re-dispatch BUG-011** once the session usage limit resets (9:50pm Asia/Seoul,
-   2026-08-08). Point the new builder at the existing `lib/plaid-mapping.ts` (committed,
-   already correct and reviewed) instead of having it redo that work — the design decisions
-   (account/category mapping via the existing-but-unused `plaidId` columns, transaction-id
-   reuse for idempotency, amount sign flip, cursor persistence) were already made and verified
-   against Plaid's real docs; the new builder should implement the sync endpoint + cursor
-   column + tests on top of the existing mapping file, not re-derive the design. (BUG-014,
-   originally bundled with this dispatch, is done — fixed directly, see "Done".)
-2. CV/portfolio text update — outside this repo's scope, needs the user directly.
+1. **Review BUG-011** via `/tekshir-finance` (commits `6c70170`, `05c6250`, `ad44ea1` + docs).
+2. **End-to-end sanity check against Plaid sandbox** — everything in BUG-011 is proven through
+   mocks only (per the dispatch's constraints: no live Plaid call, no live DB write). The
+   first real `npm run dev` + Link-a-sandbox-bank + "Sync transactions" run is still untested
+   territory; BUG-021's lesson (tsc/vitest/eslint all green while the server was broken)
+   applies directly here. Worth watching for: whether sandbox data trips the BUG-005
+   unique-name adoption path, and whether `transactions_update_status: NOT_READY` on a
+   freshly-linked Item means the first sync legitimately returns zero rows.
+3. CV/portfolio text update — outside this repo's scope, needs the user directly.
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

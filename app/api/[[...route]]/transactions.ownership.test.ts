@@ -29,7 +29,6 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 });
 
 vi.mock("@hono/clerk-auth", () => ({
-  clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => next(),
   getAuth: () => ({ userId: "user_me" }),
 }));
 

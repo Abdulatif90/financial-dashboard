@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Hono } from "hono";
-import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
+import { getAuth } from "@hono/clerk-auth";
 import { zValidator } from "@hono/zod-validator";
 import { db } from "@/db/drizzle";
 import { sql, eq, and, gte, lte, lt, desc } from "drizzle-orm";
@@ -14,7 +14,6 @@ import { fillMissingDays } from "@/lib/utils";
 
 const app = new Hono()
 .get("/",
-  clerkMiddleware(),
   zValidator(   
     "query",
     z.object({

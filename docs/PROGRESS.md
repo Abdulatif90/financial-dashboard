@@ -5,7 +5,7 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-001 + BUG-002 fixed
+2026-08-08 — BUG-001, BUG-002, BUG-003, BUG-004 fixed
 
 ## Current phase
 **Phase 2 — Fix bugs, in priority order** (see docs/PLAN.md). Phase 0 (foundation) and Phase 1
@@ -40,8 +40,20 @@ the sequencing and docs/BUGS.md for the full bug list.
   before writing, returning 404 otherwise. Mock's `resultQueue` (array, one entry per db
   round-trip) replaced the old single-value mock since these routes now make 2 db calls
   instead of 1. 11/11 tests pass, `tsc --noEmit` and `eslint` both clean
-- Committed: `5256ef0` (initial) — the BUG-001/BUG-002 fix + expanded test suite is the next
-  commit to land
+- **BUG-003 fixed**: removed redundant per-route `clerkMiddleware()` calls (and unused
+  imports) from `accounts.ts`, `categories.ts`, `transactions.ts`, `summary.ts`, `plaid.ts`
+  (scope widened from the original BUG-003 write-up once `summary.ts`/`plaid.ts` were also
+  found to have the pattern). Per-handler `getAuth()` null-checks were kept for TS narrowing
+  — see the BUG-003 entry in docs/BUGS.md for why.
+- **BUG-004 fixed**: added indexes to `db/schema.ts`, generated `drizzle/0006_true_leader.sql`,
+  applied it to the live dev DB. Measured honestly with `EXPLAIN ANALYZE` — no visible
+  execution-time change at the current ~90-row scale (Postgres correctly prefers Seq Scan
+  either way), but confirmed the indexes are real and usable via `SET enable_seqscan = off`.
+  Full numbers in docs/BUGS.md BUG-004. Re-measure once there's real data volume.
+- Found BUG-019 incidentally: `npm run lint` fails project-wide, pre-existing, unrelated to
+  this session's changes (confirmed the actually-touched files lint clean)
+- Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002) — the BUG-003/BUG-004 fix is the
+  next commit to land
 - `.claude/skills/tekshir-finance/SKILL.md` created (invoke as `/tekshir-finance`) —
   project-scoped overseer workflow, adapted from the StudyMate `tekshir` skill to this repo's
   stack (vitest/tsc/eslint, docs/BUGS.md + docs/PLAN.md instead of StudyMate's docs/).
@@ -49,22 +61,20 @@ the sequencing and docs/BUGS.md for the full bug list.
   Also checks uncommitted changes and subagent/Task-tool work, not just git commits.
 
 ## Not done yet
-- BUG-003 (redundant per-route `clerkMiddleware()`), BUG-004 (missing indexes) — the rest of
-  Priority 1
-- BUG-005 through BUG-008 — Priority 2
+- **All of Priority 1 (BUG-001..BUG-004) is now fixed.** Priority 2 (BUG-005..BUG-008) is next.
 - BUG-006 test still documents the bug (asserts midnight), not the fix — still open
 - BUG-007 test still documents the bug (schema accepts fractional amounts) — still open
+- BUG-019 (new, found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings)
+  in files this session never touched — not fixed, out of scope for Priority 1
 - `npm run dev` not yet verified locally against real `.env` values
 - Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
   per docs/PLAN.md
 
 ## Next
-1. BUG-003 — drop the redundant per-route `clerkMiddleware()` + `!auth.userId` checks in
-   `accounts.ts`, `categories.ts`, `transactions.ts` (app-level guard in `app.ts` already
-   covers this)
-2. BUG-004 — add indexes (`accounts.userId`, `categories.userId`,
-   `transactions(accountId, date)`, `transactions.categoryId`), generate a migration, measure
-   with `EXPLAIN ANALYZE` before/after
+1. Priority 2: BUG-005 (unique constraint on account/category names), BUG-006 (date-range
+   end-of-day fix — test already exists and documents the bug), BUG-007 (money as cents,
+   expand-contract migration), BUG-008 (`NEXT_PUBLIC_API_URL` module-load crash) — and
+   BUG-018 (`db/drizzle.ts` has the same module-load crash pattern, found alongside BUG-008)
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

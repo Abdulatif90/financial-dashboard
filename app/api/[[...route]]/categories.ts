@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator }  from "@hono/zod-validator";
-import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
+import { getAuth } from "@hono/clerk-auth";
 import { categories, insertCategorySchema } from "@/db/schema";
 import { db } from "@/db/drizzle";
 import { eq, and, inArray, sql } from "drizzle-orm";
@@ -17,7 +17,6 @@ const categoryNameSchema = z.object({
 
 const app = new Hono()
     .get("/",
-      clerkMiddleware(),
         async (c) => {{
           const auth = getAuth(c);
 
@@ -37,7 +36,6 @@ const app = new Hono()
     )
     .get("/:id",
       zValidator("param", z.object({ id: z.string().optional() })),
-      clerkMiddleware(),
         async (c) => {{ 
           const auth = getAuth(c);
           const { id } = c.req.valid("param");
@@ -67,7 +65,6 @@ const app = new Hono()
         }}
     )
     .post("/",
-      clerkMiddleware(),
       zValidator("json", categoryNameSchema),
         async (c) => {
           const auth = getAuth(c);
@@ -105,7 +102,6 @@ const app = new Hono()
     )
     .post(
       "/bulk-delete",
-      clerkMiddleware(),
       zValidator(
         "json", 
         z.object({
@@ -133,7 +129,6 @@ const app = new Hono()
     )
     .patch(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
       zValidator("json", categoryNameSchema),
       async (c) => {
@@ -170,7 +165,6 @@ const app = new Hono()
     )
     .delete(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
       async (c) => {
         const auth = getAuth(c);

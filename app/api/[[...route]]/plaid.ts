@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { clerkMiddleware } from "@hono/clerk-auth";
 import { Configuration, PlaidEnvironments, PlaidApi, Products, CountryCode } from "plaid";
 import { getAuth } from "@hono/clerk-auth";
 import { zValidator } from "@hono/zod-validator";
@@ -23,8 +22,7 @@ const client = new PlaidApi(configuration);
 
 const app = new Hono()
 .post(
-    "/create-link-token", 
-    clerkMiddleware(),
+    "/create-link-token",
     async (c) => {
         const auth = getAuth(c);
         if (!auth?.userId) {
@@ -45,8 +43,7 @@ const app = new Hono()
     }
 )
 .post(
-    "/exchange-public-token", 
-    clerkMiddleware(),
+    "/exchange-public-token",
     zValidator(
         "json",
         z.object({

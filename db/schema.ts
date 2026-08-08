@@ -1,7 +1,8 @@
 import { createInsertSchema } from "drizzle-zod";
 import {
-    integer, 
-    pgTable, 
+    index,
+    integer,
+    pgTable,
     text,
     timestamp } from "drizzle-orm/pg-core";
 
@@ -25,7 +26,9 @@ export const accounts = pgTable("accounts", {
     plaidId: text("plaid_id"),
     name: text("name").notNull(),
     userId: text("user_id").notNull(),
-});
+}, (table) => [
+    index("accounts_user_id_idx").on(table.userId),
+]);
 
 export const accountsRelations = relations(accounts, ({ many }) => ({
     transactions: many(transactions),
@@ -39,7 +42,9 @@ export const categories = pgTable("categories", {
     plaidId: text("plaid_id"),
     name: text("name").notNull(),
     userId: text("user_id").notNull(),
-});
+}, (table) => [
+    index("categories_user_id_idx").on(table.userId),
+]);
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
     transactions: many(transactions),
@@ -60,7 +65,10 @@ export const transactions = pgTable("transactions", {
     categoryId: text("category_id").references(() => categories.id, {
         onDelete: "set null",
     }),
-})
+}, (table) => [
+    index("transactions_account_id_date_idx").on(table.accountId, table.date),
+    index("transactions_category_id_idx").on(table.categoryId),
+])
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
     account: one(accounts, {

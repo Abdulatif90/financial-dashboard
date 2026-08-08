@@ -36,21 +36,55 @@ onto someone else's account.
 **Test:** `transactions.ownership.test.ts` — "PATCH /transactions/:id ownership" asserts
 `404` for a foreign `accountId`.
 
-### BUG-003 🔴 Redundant per-route auth middleware
+### BUG-003 🟢 Fixed 2026-08-08 — Redundant per-route auth middleware
 **Verified.** `app/api/[[...route]]/app.ts:10-23` already applies `clerkMiddleware()` once
-and a 401 guard app-wide. Every single handler in `accounts.ts`, `categories.ts`, and
-`transactions.ts` calls `clerkMiddleware()` again and re-checks `!auth.userId` manually. Not
-a security hole (defense in depth is harmless), but it's dead weight and makes the real guard
+and a 401 guard app-wide. Every single handler in `accounts.ts`, `categories.ts`,
+`transactions.ts`, `summary.ts`, and `plaid.ts` (broader than originally scoped — same
+pattern found in the last two once actually checked) called `clerkMiddleware()` again. Not a
+security hole (defense in depth is harmless), but it's dead weight and makes the real guard
 harder to find.
-**Fix:** drop the per-route `clerkMiddleware()` calls and redundant guards; trust the
-app-level middleware.
+**Fix applied:** removed the per-route `clerkMiddleware()` calls (and the now-unused import)
+from all five route files; `app.ts`'s app-level middleware is the only place it runs now.
+**Note (scope correction):** the per-handler `const auth = getAuth(c); if (!auth.userId) {...}`
+checks were **kept**, not dropped as originally planned — `getAuth()`'s return type has
+`userId: string | null`, so TypeScript can't know the app-level guard already ran; removing
+the check would either break `tsc --noEmit` (passing a possibly-null `userId` into
+`eq(accounts.userId, ...)` / a `.notNull()` insert column) or require scattering non-null
+assertions instead. The check now exists purely for type narrowing, not as a second security
+check — that's still worth keeping, just for a different reason than BUG-003 originally
+assumed.
 
-### BUG-004 🔴 No indexes anywhere in the schema
-**Verified.** `db/schema.ts` has zero `.index()` / index definitions. Every list query
+### BUG-004 🟢 Fixed 2026-08-08 — No indexes anywhere in the schema
+**Verified.** `db/schema.ts` had zero `.index()` / index definitions. Every list query
 filters by `accounts.userId`, `categories.userId`, or joins `transactions` to `accounts` and
-filters by date range — all full scans today.
-**Fix:** add indexes on `accounts.userId`, `categories.userId`, `transactions(accountId, date)`,
-`transactions.categoryId`. Run `EXPLAIN ANALYZE` before and after and record both numbers here.
+filters by date range — all full scans.
+**Fix applied:** added indexes on `accounts.userId`, `categories.userId`,
+`transactions(accountId, date)`, `transactions.categoryId` (`db/schema.ts`), generated via
+`npx drizzle-kit generate` (`drizzle/0006_true_leader.sql`), applied via
+`npx drizzle-kit migrate`.
+**Measured (honestly, not fabricated):** ran `EXPLAIN ANALYZE` on the GET /transactions query
+shape (join transactions→accounts→categories, filtered by a real `user_id`) against the live
+dev DB — 90 transactions, 17 accounts, 63 categories. Before: `Seq Scan` throughout, 0.187ms
+execution. After: **still `Seq Scan` throughout, 0.123ms** — the difference is noise, not the
+index. At this row count, Postgres's planner correctly prefers a sequential scan; an index
+scan only wins once a table is large enough that the index's overhead is worth it (typically
+four-to-five-figure row counts, not 90). Confirmed the indexes are real and usable anyway by
+re-running with `SET enable_seqscan = off`: the plan switches to
+`Index Scan using transactions_category_id_idx` / `accounts_pkey` / `categories_pkey` and
+still completes in 0.171ms. So: the indexes are correctly built and will matter once this
+table has real production volume, but there is no honest "420→270"-style number to report
+today — the dataset is too small for the index to change anything yet. Re-run this
+measurement once the table has thousands of rows.
+
+### BUG-019 🔴 `npm run lint` currently fails project-wide (pre-existing, unrelated to BUG-001..018)
+**Verified**, found incidentally while confirming lint was clean after the BUG-003/BUG-004
+changes — `npx eslint .` reports 1 error (`@typescript-eslint/no-explicit-any` in
+`components/custom-tooltip.tsx:5`) and 6 warnings (an incompatible-library warning in
+`components/data-table.tsx`, four `formSchema` unused-as-value warnings in the
+account/category sheet components, one unused `queryClient` in
+`features/plaid/api/use-exchange-public-token.ts`) across files this session never touched.
+Not fixed here — out of scope for BUG-003/BUG-004, and touches several unrelated files.
+**Fix:** address each individually; the plaid one overlaps with BUG-009's TODO.
 
 ---
 

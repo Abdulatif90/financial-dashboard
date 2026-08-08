@@ -22,7 +22,10 @@ const CATEGORY_COLORS = [
 // BUG-007: amounts are stored in cents (whole integers) so a $12.34 transaction round-trips
 // exactly, instead of an `integer` DB column silently truncating a fractional dollar amount.
 export function convertAmountToCents(amount: number) {
-    return Math.round(amount * 100);
+    // `amount * 100` alone can land just below a whole cent (e.g. 1.005 * 100 ===
+    // 100.49999999999999 in IEEE-754), rounding down to the wrong cent. toFixed(2) snaps back
+    // to the nearest cent as a string first, so the subsequent Math.round is exact.
+    return Math.round(Number((amount * 100).toFixed(2)));
 }
 
 export function convertAmountFromCents(amountInCents: number) {

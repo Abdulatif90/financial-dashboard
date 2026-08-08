@@ -85,6 +85,16 @@ const app = new Hono()
             // BUG-013: item_id is needed for item management (disconnect via itemRemove,
             // future webhook/sync-cursor work) -- previously discarded.
             itemId: exchange.data.item_id,
+         })
+         // Re-linking an Item Plaid already knows about (user re-does the Link flow) would
+         // otherwise hit connected_banks_item_id_unique_idx and 500 -- refresh the stored
+         // credential instead, since Plaid always issues a new access_token per exchange.
+         .onConflictDoUpdate({
+            target: connectedBanks.itemId,
+            set: {
+                accessToken: exchange.data.access_token,
+                userId: auth.userId,
+            },
          });
 
         // Never return the Plaid access_token to the client -- it's a long-lived credential
@@ -133,7 +143,15 @@ const app = new Hono()
         }
 
         for (const row of rows) {
-            await client.itemRemove({ access_token: row.accessToken });
+            try {
+                await client.itemRemove({ access_token: row.accessToken });
+            } catch {
+                // Plaid throws if the Item was already removed on their side (or its
+                // credentials are already invalid) -- e.g. ITEM_NOT_FOUND. Either way, the
+                // Item is gone from Plaid's perspective, so deleting our local record is
+                // still the correct outcome; without this, a stale row would keep /status
+                // reporting connected and leave the user unable to disconnect or reconnect.
+            }
 
             await db
                 .delete(connectedBanks)

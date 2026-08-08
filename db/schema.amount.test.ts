@@ -35,6 +35,13 @@ describe("convertAmountToCents / convertAmountFromCents / formatCurrency", () =>
     expect(convertAmountToCents(0.1)).toBe(10);
   });
 
+  it("rounds half-cent boundary values correctly despite IEEE-754 float noise", () => {
+    // 1.005 * 100 === 100.49999999999999 in raw floating point -- without the toFixed(2)
+    // correction in convertAmountToCents this rounds down to 100 instead of 101.
+    expect(convertAmountToCents(1.005)).toBe(101);
+    expect(convertAmountToCents(-1.005)).toBe(-100);
+  });
+
   it("round-trips cents back to the original dollar amount", () => {
     expect(convertAmountFromCents(1234)).toBe(12.34);
     expect(convertAmountFromCents(-500)).toBe(-5);

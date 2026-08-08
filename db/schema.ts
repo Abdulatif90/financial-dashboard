@@ -94,8 +94,10 @@ export const insertTransactionSchema = createInsertSchema(transactions, {
     categoryId: nullableText,
     payee: z.string().trim().min(1, "Payee is required"),
     // BUG-007: amount is cents, so it must always be a whole number by the time it reaches
-    // this schema (the client converts dollars -> cents before sending).
-    amount: z.number().int("Amount must be a whole number of cents"),
+    // this schema (the client converts dollars -> cents before sending). z.int32 (not plain
+    // z.number().int()) also bounds it to Postgres's `integer` range -- z.number().int()
+    // alone would let e.g. 3_000_000_000 pass validation only to fail at insert.
+    amount: z.int32("Amount must be a whole number of cents within the 32-bit integer range"),
     notes: nullableText,
 });
 

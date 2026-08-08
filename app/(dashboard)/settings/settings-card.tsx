@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import {
     Card,
     CardContent,
@@ -41,7 +42,14 @@ export const SettingsCard = () => {
                     )}>
                         {connectBank ? "Bank account connected" : "No bank account connected"}
                     </div>
-                    {connectBank ? (
+                    {plaidStatus.isLoading ? (
+                        // Don't render the disconnected state (and mount PlaidConnect, which
+                        // creates a Plaid link token on mount) while we don't actually know
+                        // the connection status yet -- an already-connected user would
+                        // otherwise briefly see "Connect" and generate an unused link token
+                        // on every Settings visit.
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : connectBank ? (
                         <div className="flex items-center gap-x-2">
                             <Button
                                 size="sm"

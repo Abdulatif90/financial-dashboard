@@ -6,7 +6,7 @@ import { db } from "@/db/drizzle";
 import { eq, and, inArray, gte, lte, desc, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { transactions, insertTransactionSchema, categories, accounts } from "@/db/schema";
-import { parse } from "date-fns";
+import { endOfDay, parse } from "date-fns";
 
 
  
@@ -29,7 +29,10 @@ const app = new Hono()
           }
 
           const startDate = from ? parse(from, "yyyy-MM-dd", new Date()) : undefined;
-          const endDate = to ? parse(to, "yyyy-MM-dd", new Date()) : undefined;
+          // endOfDay: `to` is a calendar date with no time component, and `lte` compares
+          // against it -- without this, transactions on the `to` date after midnight would
+          // be excluded (BUG-006).
+          const endDate = to ? endOfDay(parse(to, "yyyy-MM-dd", new Date())) : undefined;
 
           const data = await db
             .select({

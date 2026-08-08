@@ -5,7 +5,7 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-001, BUG-002, BUG-003, BUG-004 fixed
+2026-08-08 — BUG-006, BUG-008, BUG-018 fixed; BUG-005 and BUG-007 blocked on a user decision
 
 ## Current phase
 **Phase 2 — Fix bugs, in priority order** (see docs/PLAN.md). Phase 0 (foundation) and Phase 1
@@ -52,29 +52,48 @@ the sequencing and docs/BUGS.md for the full bug list.
   Full numbers in docs/BUGS.md BUG-004. Re-measure once there's real data volume.
 - Found BUG-019 incidentally: `npm run lint` fails project-wide, pre-existing, unrelated to
   this session's changes (confirmed the actually-touched files lint clean)
-- Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002) — the BUG-003/BUG-004 fix is the
-  next commit to land
+- **BUG-006 fixed** in both `transactions.ts` and `summary.ts` (same pattern in both) —
+  wrapped the parsed `to` date in date-fns `endOfDay()`. Test flipped from
+  documenting-the-bug to asserting-the-fix.
+- **BUG-008 + BUG-018 fixed**: `lib/hono.ts`'s `client` and `db/drizzle.ts`'s `sql`/`db` are
+  now lazy `Proxy`-wrapped instead of constructed at module scope, so a missing env var only
+  fails the call that needed it, not every import. Verified with throwaway scripts (import
+  succeeds, only usage throws) AND a smoke test against the **live dev DB** confirming
+  `db.select().where()` and `` sql`...` `` still work correctly through the proxy (methods
+  are `.bind()`ed to the real instance so `this` doesn't break).
+- **BUG-005 investigation found a live blocker**: checked the dev DB for existing duplicate
+  account/category names before adding the unique constraint (good instinct — a migration
+  against violating data would just fail) and found real duplicates already exist. Stopped
+  and documented rather than picking a merge strategy unilaterally.
+- Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002), `f430bff` (BUG-003/BUG-004) —
+  the BUG-006/BUG-008/BUG-018 fix is the next commit to land
 - `.claude/skills/tekshir-finance/SKILL.md` created (invoke as `/tekshir-finance`) —
   project-scoped overseer workflow, adapted from the StudyMate `tekshir` skill to this repo's
   stack (vitest/tsc/eslint, docs/BUGS.md + docs/PLAN.md instead of StudyMate's docs/).
   Named distinctly (not `tekshir`) to avoid ambiguity with the StudyMate skill of that name.
   Also checks uncommitted changes and subagent/Task-tool work, not just git commits.
 
-## Not done yet
-- **All of Priority 1 (BUG-001..BUG-004) is now fixed.** Priority 2 (BUG-005..BUG-008) is next.
-- BUG-006 test still documents the bug (asserts midnight), not the fix — still open
-- BUG-007 test still documents the bug (schema accepts fractional amounts) — still open
-- BUG-019 (new, found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings)
-  in files this session never touched — not fixed, out of scope for Priority 1
+## Not done yet — two Priority 2 items are blocked, need the user to decide
+- **BUG-005 (unique constraint) is blocked**: the live dev DB already has real duplicate
+  account/category names for one user (found while checking before adding the constraint —
+  see docs/BUGS.md BUG-005 for the exact rows). A unique index migration will fail against
+  existing violations. Fixing this means merging or renaming those duplicates first, which
+  deletes rows and rewires `transactions` foreign keys — **not done without the user picking
+  an approach** (merge into a canonical row vs. rename in place).
+- **BUG-007 (money as cents) not started**: same category of concern — the live DB already
+  has ~90 real transaction rows stored as whole-dollar integers. Converting the semantic
+  meaning to cents requires either a one-time `UPDATE ... SET amount = amount * 100` against
+  live data, or a more careful expand-contract with a second column. Either mutates real
+  stored financial values — **flagging before touching it, not assuming "davom et" covers
+  mutating stored money values.**
+- BUG-019 (found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings) in
+  files this session never touched — not fixed, out of scope
 - `npm run dev` not yet verified locally against real `.env` values
 - Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
-  per docs/PLAN.md
 
 ## Next
-1. Priority 2: BUG-005 (unique constraint on account/category names), BUG-006 (date-range
-   end-of-day fix — test already exists and documents the bug), BUG-007 (money as cents,
-   expand-contract migration), BUG-008 (`NEXT_PUBLIC_API_URL` module-load crash) — and
-   BUG-018 (`db/drizzle.ts` has the same module-load crash pattern, found alongside BUG-008)
+Waiting on the user for BUG-005 and BUG-007 (see above). Everything else fixable without
+touching live data is done through BUG-018.
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

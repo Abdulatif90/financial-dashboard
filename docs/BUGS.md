@@ -90,25 +90,47 @@ Not fixed here — out of scope for BUG-003/BUG-004, and touches several unrelat
 
 ## Priority 2
 
-### BUG-005 🔴 Duplicate-name race on accounts/categories
-**Verified.** `accounts.ts:79-94` and `categories.ts:79-94` do an app-level
-`select` (case-insensitive, trimmed match) then `insert` — classic check-then-act. Two
-concurrent requests (e.g. a double-click) can both pass the check and insert duplicate names.
-**Fix:** add a DB-level `UNIQUE (user_id, lower(trim(name)))` constraint; let the DB reject
-the race instead of the app layer racing itself.
+### BUG-005 🔴 Duplicate-name race on accounts/categories — BLOCKED, needs a decision
+**Verified, and worse than expected: this has already happened in production**, not just a
+theoretical race. `accounts.ts` and `categories.ts` do an app-level `select`
+(case-insensitive, trimmed match) then `insert` — classic check-then-act. Two concurrent
+requests (e.g. a double-click) can both pass the check and insert duplicate names.
 
-### BUG-006 🔴 Date-range filter drops same-day transactions after midnight
-**Verified.** `GET /api/transactions` (`transactions.ts:17-33`) parses `to` with
-`parse(to, "yyyy-MM-dd", new Date())`, which lands on `00:00:00`, then filters with
-`lte(transactions.date, endDate)`. Any transaction on the `to` date after midnight is
-excluded from the range.
-**Fix:** normalize to end-of-day (`23:59:59.999`) before comparing. Also: seed data
-(`scripts/seed.ts`) uses whole-day timestamps with no time component, so this bug is
-invisible against seeded data — randomize seed transaction times as part of the fix so the
-bug can't hide again.
-**Test:** `transactions.ownership.test.ts` — "GET /transactions date-range boundary" spies on
-the real `lte` from drizzle-orm and asserts the `to` date it receives is local midnight
-(the bug); flip to assert end-of-day once fixed.
+Checked the live dev DB directly (2026-08-08) before attempting the fix: user
+`user_3ARwkpDyxNuobnknXHhlpffgH6u` already has **real duplicate rows** —
+`accounts`: "Savings Account" ×4, "Cash Wallet" ×4; `categories`: "Education" ×4, "Rent" ×4,
+"Gift" ×4, "Interest" ×4, "Transfer" ×4 (all same normalized name, same user).
+
+**This blocks the straightforward fix.** A `CREATE UNIQUE INDEX` migration will fail outright
+against data that already violates it. Fixing this requires deciding how to handle the
+existing duplicates before the constraint can be added:
+1. Pick a canonical row per `(user_id, lower(trim(name)))` group (e.g. oldest `id`),
+   re-point every `transactions` row referencing a duplicate's `id` to the canonical row's
+   `id`, then delete the duplicate rows — then add the unique index.
+2. Or: rename the duplicates (e.g. append a suffix) instead of merging, preserving all rows
+   and their transaction history as-is, then add the unique index.
+
+Both mutate/delete real stored rows and rewire foreign keys — **not attempted without the
+user's go-ahead on which approach they want.**
+**Fix (once unblocked):** add a DB-level `UNIQUE (user_id, lower(trim(name)))` constraint via
+`uniqueIndex` in `db/schema.ts`; wrap the `POST /` insert in accounts.ts/categories.ts in a
+try/catch for the unique-violation (Postgres code `23505`) and fall back to returning the
+existing row, preserving the current idempotent-create UX instead of 500ing on the race.
+
+### BUG-006 🟢 Fixed 2026-08-08 — Date-range filter drops same-day transactions after midnight
+**Verified.** `GET /api/transactions` (`transactions.ts`) parsed `to` with
+`parse(to, "yyyy-MM-dd", new Date())`, which lands on `00:00:00`, then filtered with
+`lte(transactions.date, endDate)`. Any transaction on the `to` date after midnight was
+excluded from the range. The identical pattern also existed in `summary.ts`'s `to` handling.
+**Fix applied:** both now wrap the parsed `to` date in date-fns' `endOfDay()` before
+comparing.
+**Not fixed (separate, smaller issue):** seed data (`scripts/seed.ts`) uses whole-day
+timestamps with no time component, so this bug was invisible against seeded data. Left as-is
+for now — randomizing seed times is cosmetic/test-quality, not a correctness bug, and safe to
+defer.
+**Test:** `transactions.ownership.test.ts` — "GET /transactions date-range boundary (BUG-006,
+fixed)" spies on the real `lte` from drizzle-orm and asserts the `to` date it receives is
+`23:59:59`, not midnight.
 
 ### BUG-007 🔴 Amounts stored as whole-dollar integer but UI accepts cents
 **Verified.** `db/schema.ts:53` — `amount: integer("amount")`. `components/amount-input.tsx`
@@ -119,20 +141,29 @@ not stored as entered.
 **Fix:** migrate to storing cents. Expand-contract: add new column -> backfill -> switch
 reads/writes to it -> drop old column. Do not do a blind in-place type change.
 
-### BUG-008 🔴 `NEXT_PUBLIC_API_URL` missing env var crashes the whole app
-**Verified.** `lib/hono.ts:4-7` throws at **module import time** if the env var is unset.
-Since this module is imported by every feature's API hook, one missing env var blank-screens
-the entire app instead of failing one request.
-**Fix:** move the check out of module scope (e.g. validate lazily inside the client factory,
-or fail per-call with a catchable error).
+### BUG-008 🟢 Fixed 2026-08-08 — `NEXT_PUBLIC_API_URL` missing env var crashes the whole app
+**Verified.** `lib/hono.ts` threw at **module import time** if the env var was unset. Since
+this module is imported by every feature's API hook, one missing env var blank-screened the
+entire app instead of failing one request.
+**Fix applied:** `client` is now a `Proxy` that lazily constructs the real `hc<AppType>()`
+client (and does the env-var check) on first actual property access, not at import time.
+Methods returned through the proxy are `.bind()`ed to the real client so `this` stays
+correct. Verified with a throwaway script: importing `@/lib/hono` with
+`NEXT_PUBLIC_API_URL` unset now succeeds; only actually using `client` throws, and the error
+is still the same catchable message. All 22 consumer files (`features/**/api/use-*.ts`)
+needed no changes — same `client.api.xxx` shape.
 
-### BUG-018 🔴 `db/drizzle.ts` also crashes at import time without `DATABASE_URL`
-**Verified.** `db/drizzle.ts:4` — `neon(process.env.DATABASE_URL!)` runs at module load, not
-inside a request handler. Same failure mode as BUG-008, different module: any route/script
-that imports `@/db/drizzle` without `DATABASE_URL` set fails at import, before any request-
-level error handling can catch it. Relevant for tests too — route handler tests must
-`vi.mock("@/db/drizzle")` before importing the route, or the import itself throws.
-**Fix:** same pattern as BUG-008 — construct the client lazily instead of at module scope.
+### BUG-018 🟢 Fixed 2026-08-08 — `db/drizzle.ts` also crashed at import time without `DATABASE_URL`
+**Verified.** `db/drizzle.ts` called `neon(process.env.DATABASE_URL!)` at module load, not
+inside a request handler. Same failure mode as BUG-008, different module.
+**Fix applied:** same `Proxy` + lazy-construction + `.bind()` pattern as BUG-008, applied to
+both `sql` (the Neon tagged-template client — its proxy target is a function so it stays
+callable as `` sql`...` ``) and `db` (the drizzle instance). Verified two ways: (1) a
+throwaway script confirmed import succeeds with `DATABASE_URL` unset and only usage throws;
+(2) a smoke test against the **live dev DB** confirmed `db.select().from().where()` and
+`` sql`select 1` `` both still work correctly through the proxy (this mattered because a
+naive proxy `get` trap without `.bind()` would silently break `this`-dependent methods on the
+real drizzle/neon client objects).
 
 ---
 

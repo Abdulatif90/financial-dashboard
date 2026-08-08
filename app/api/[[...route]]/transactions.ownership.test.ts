@@ -3,11 +3,11 @@ import { accounts } from "@/db/schema";
 
 // BUG-001, BUG-002, BUG-006 (docs/BUGS.md): the transactions routes had three verified gaps
 // -- (1) create/bulk-create never checked accountId ownership, (2) update never checked a
-// *new* accountId's ownership, (3) the `to` date-range filter compares against local
-// midnight instead of end-of-day, silently excluding same-day transactions. BUG-001/BUG-002
-// are fixed (see transactions.ts); BUG-006 is still open. This suite proves both against the
-// real route code, plus regression tests proving the already-correct read/delete paths still
-// filter by `eq(accounts.userId, auth.userId)`.
+// *new* accountId's ownership, (3) the `to` date-range filter compared against local
+// midnight instead of end-of-day, silently excluding same-day transactions. All three are
+// fixed (see transactions.ts). This suite proves the fixes against the real route code, plus
+// regression tests proving the already-correct read/delete paths still filter by
+// `eq(accounts.userId, auth.userId)`.
 //
 // Strategy: `db` is replaced with a generic "chainable" proxy (any method call returns
 // another chainable link; awaiting it resolves to the next entry in `resultQueue`) so every
@@ -184,8 +184,8 @@ describe("Ownership regression: reads and deletes still filter by accounts.userI
   });
 });
 
-describe("GET /transactions date-range boundary (BUG-006, still open)", () => {
-  it("compares the `to` date at local midnight, not end-of-day", async () => {
+describe("GET /transactions date-range boundary (BUG-006, fixed)", () => {
+  it("compares the `to` date at end-of-day, so same-day transactions are included", async () => {
     resultQueue = [[]];
 
     await transactionsApp.request("/?to=2026-01-15");
@@ -194,10 +194,8 @@ describe("GET /transactions date-range boundary (BUG-006, still open)", () => {
     const lastCall = lteMock.mock.calls.at(-1);
     const endDate = lastCall?.[1] as Date;
 
-    // This is the bug: a transaction on 2026-01-15 at, say, 14:00 is excluded because
-    // endDate is midnight, not 23:59:59.999. Once fixed, assert endDate is end-of-day.
-    expect(endDate.getHours()).toBe(0);
-    expect(endDate.getMinutes()).toBe(0);
-    expect(endDate.getSeconds()).toBe(0);
+    expect(endDate.getHours()).toBe(23);
+    expect(endDate.getMinutes()).toBe(59);
+    expect(endDate.getSeconds()).toBe(59);
   });
 });

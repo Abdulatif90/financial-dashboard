@@ -28,7 +28,7 @@ import { DataTable } from "@/components/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UploadButton } from "./upload-button";
 import { client } from "@/lib/hono";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import {
     Table,
     TableBody,
@@ -79,10 +79,6 @@ type ImportSummary = {
 const REQUIRED_IMPORT_FIELDS = ["date", "account", "payee", "amount"] as const;
 
 const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[\s_-]+/g, "");
-const amountFormatter = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-});
 
 const getCsvValue = (row: CsvRow, aliases: string[]) => {
     const normalizedAliases = aliases.map(normalizeHeader);
@@ -106,6 +102,24 @@ const getCsvValue = (row: CsvRow, aliases: string[]) => {
 
 const normalizeName = (value: string) => value.trim().toLowerCase();
 
+const getResponseErrorMessage = async (response: Response, fallbackMessage: string) => {
+    try {
+        const payload = await response.json();
+
+        if (typeof payload?.message === "string" && payload.message.trim()) {
+            return payload.message;
+        }
+
+        if (typeof payload?.error === "string" && payload.error.trim()) {
+            return payload.error;
+        }
+    } catch {
+        // Ignore non-JSON error responses and fall back to the default message.
+    }
+
+    return fallbackMessage;
+};
+
 const parseCsvAmount = (value: string) => {
     const sanitizedValue = value.replace(/[$,\s]/g, "");
     const normalizedValue = sanitizedValue.startsWith("(") && sanitizedValue.endsWith(")")
@@ -117,7 +131,7 @@ const parseCsvAmount = (value: string) => {
         throw new Error(`Invalid amount: ${value}`);
     }
 
-    return parsedAmount;
+    return Math.round(parsedAmount * 100);
 };
 
 const parseCsvDate = (value: string) => {
@@ -343,7 +357,12 @@ const TransactionsPageContent = () => {
                     });
 
                     if (!response.ok) {
-                        throw new Error(`Failed to create account \"${row.normalized.accountName}\".`);
+                        throw new Error(
+                            await getResponseErrorMessage(
+                                response,
+                                `Failed to create account \"${row.normalized.accountName}\".`
+                            )
+                        );
                     }
 
                     const { data } = await response.json();
@@ -363,7 +382,12 @@ const TransactionsPageContent = () => {
                         });
 
                         if (!response.ok) {
-                            throw new Error(`Failed to create category \"${row.normalized.categoryName}\".`);
+                            throw new Error(
+                                await getResponseErrorMessage(
+                                    response,
+                                    `Failed to create category \"${row.normalized.categoryName}\".`
+                                )
+                            );
                         }
 
                         const { data } = await response.json();
@@ -532,7 +556,7 @@ const TransactionsPageContent = () => {
                                         <TableCell>{row.payee || "-"}</TableCell>
                                         <TableCell>
                                             {row.normalized
-                                                ? amountFormatter.format(row.normalized.amount)
+                                                ? formatCurrency(row.normalized.amount)
                                                 : row.amount || "-"}
                                         </TableCell>
                                         <TableCell>{row.notes || "-"}</TableCell>

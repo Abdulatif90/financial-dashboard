@@ -12,6 +12,7 @@ import { useGetTransaction } from "../api/use-get-transaction";
 import { useDeleteTransaction } from "../api/use-delete-transaction";
 import { useEditTransaction } from "../api/use-edit-transaction";
 import { useConfirm } from "@/hooks/use-confirm";
+import { convertAmountFromCents, convertAmountToCents } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { useCreateCategory } from "@/features/categories/api/use-create-category";
 import { useGetCategories } from "@/features/categories/api/use-get-categories";
@@ -64,7 +65,7 @@ export const EditTransactionSheet = () => {
             date: values.date,
             accountId: values.accountId,
             payee: values.payee,
-            amount: values.amount,
+            amount: convertAmountToCents(values.amount),
             categoryId: values.categoryId ?? null,
             notes: values.notes ?? null,
         }, {
@@ -92,7 +93,7 @@ export const EditTransactionSheet = () => {
         accountId: transactionQuery.data.accountId,
         categoryId: transactionQuery.data.categoryId ?? null,
         payee: transactionQuery.data.payee,
-        amount: transactionQuery.data.amount,
+        amount: convertAmountFromCents(transactionQuery.data.amount),
         notes: transactionQuery.data.notes ?? null,
     } : { 
         date: new Date(),

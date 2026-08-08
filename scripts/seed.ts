@@ -35,20 +35,21 @@ import { eachDayOfInterval, format } from "date-fns";
 
 const SEED_TRANSACTIONS: typeof transactions.$inferSelect[] = [];   
 
+// Amounts are stored in cents (BUG-007), so every branch below is a dollar amount * 100.
 const generateRandomAmount = (category: typeof categories.$inferInsert) => {
     switch (category.name) {
         case "Salary":
-            return Math.floor(Math.random() * 2000) + 3000; // $3000 - $5000
+            return (Math.floor(Math.random() * 2000) + 3000) * 100; // $3000 - $5000
         case "Groceries":
-            return -(Math.floor(Math.random() * 100) + 50); // $50 - $150
+            return -((Math.floor(Math.random() * 100) + 50) * 100); // $50 - $150
         case "Entertainment":
-            return -(Math.floor(Math.random() * 100) + 20); // $20 - $120   
+            return -((Math.floor(Math.random() * 100) + 20) * 100); // $20 - $120
         case "Utilities":
-            return -(Math.floor(Math.random() * 200) + 100);
-        case "Transportation":  
-            return -(Math.floor(Math.random() * 50) + 20);
+            return -((Math.floor(Math.random() * 200) + 100) * 100);
+        case "Transportation":
+            return -((Math.floor(Math.random() * 50) + 20) * 100);
         case "Healthcare":
-            return -(Math.floor(Math.random() * 300) + 50);
+            return -((Math.floor(Math.random() * 300) + 50) * 100);
         default:
             return 0;
     }

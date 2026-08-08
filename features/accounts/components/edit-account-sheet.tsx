@@ -16,11 +16,10 @@ import { useEditAccount } from "../api/use-edit-account";
 import { useConfirm } from "@/hooks/use-confirm";
 import { Loader2 } from "lucide-react";
 
-const formSchema = insertAccountSchema.pick({
-    name: true,
-});
-
-type FormValues = z.input<typeof formSchema>;
+// Only the type is needed here -- AccountForm owns the actual runtime schema/resolver -- so
+// this derives FormValues from insertAccountSchema's inferred input type instead of creating
+// an unused runtime `formSchema` binding (BUG-019).
+type FormValues = Pick<z.input<typeof insertAccountSchema>, "name">;
 
 export const EditAccountSheet = () => {
     const { isOpen, onClose, id } = useOpenAccount();

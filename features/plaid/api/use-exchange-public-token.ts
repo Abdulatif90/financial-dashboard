@@ -24,7 +24,9 @@ export const useExchangePublicToken = () => {
         },
         onSuccess: () => {
             toast.success("Public Link token created successfully!");
-            // TODO
+            // BUG-009: reflect the new connection in the Settings UI immediately, without a
+            // manual page refresh.
+            queryClient.invalidateQueries({ queryKey: ["plaid-status"] });
         },
         onError: () => {
             toast.error("Failed to public link token. Please try again.");

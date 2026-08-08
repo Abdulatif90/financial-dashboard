@@ -9,6 +9,7 @@ import {
     SheetDescription
 } from "@/components/ui/sheet"
 import { useCreateTransaction, type CreateTransactionRequest } from "@/features/transactions/api/use-create-transaction";
+import { convertAmountToCents } from "@/lib/utils";
 import { useCreateCategory } from "@/features/categories/api/use-create-category";
 import { useGetCategories } from "@/features/categories/api/use-get-categories";
 import { useCreateAccount } from "@/features/accounts/api/use-create-account";
@@ -46,7 +47,7 @@ export const NewTransactionSheet = () => {
     const onSubmit = (values: TransactionFormValues) => {
         const payload: CreateTransactionRequest = {
             date: values.date,
-            amount: values.amount,
+            amount: convertAmountToCents(values.amount),
             payee: values.payee,
             accountId: values.accountId,
             notes: values.notes ?? null,

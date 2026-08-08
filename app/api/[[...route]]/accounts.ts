@@ -1,19 +1,22 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator }  from "@hono/zod-validator";
-import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
+import { getAuth } from "@hono/clerk-auth";
 import { accounts, insertAccountSchema } from "@/db/schema";
 import { db } from "@/db/drizzle";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
 
  
 
 
+const accountNameSchema = z.object({
+  name: insertAccountSchema.shape.name.pipe(z.string().trim().min(1, "Name is required")),
+});
+
 const app = new Hono()
     .get("/",
-      clerkMiddleware(),
         async (c) => {{
           const auth = getAuth(c);
 
@@ -33,7 +36,6 @@ const app = new Hono()
     )
     .get("/:id",
       zValidator("param", z.object({ id: z.string().optional() })),
-      clerkMiddleware(),
         async (c) => {{ 
           const auth = getAuth(c);
           const { id } = c.req.valid("param");
@@ -63,29 +65,68 @@ const app = new Hono()
         }}
     )
     .post("/",
-      clerkMiddleware(),
-      zValidator("json", insertAccountSchema.pick({
-          name: true,
-})),
+      zValidator("json", accountNameSchema),
         async (c) => {
           const auth = getAuth(c);
           const values = c.req.valid("json")
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
-          const [data] = await db.insert(accounts).values({
-            id: createId(),
-            userId: auth.userId,
-            ...values,
-          })
-          .returning();
 
-          return c.json({ data })
+          const normalizedName = values.name.trim().toLowerCase();
+
+          const [existingAccount] = await db
+            .select()
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                sql`lower(trim(${accounts.name})) = ${normalizedName}`
+              )
+            )
+            .limit(1);
+
+          if (existingAccount) {
+            return c.json({ data: existingAccount });
+          }
+
+          try {
+            const [data] = await db.insert(accounts).values({
+              id: createId(),
+              userId: auth.userId,
+              name: values.name.trim(),
+            })
+            .returning();
+
+            return c.json({ data })
+          } catch (error) {
+            // BUG-005: the select-then-insert above has a race -- two concurrent requests
+            // can both miss the pre-check. The DB-level unique index (accounts_user_id_name_
+            // unique_idx) is the actual guard; on a genuine race, fall back to the same
+            // "return the existing row" behavior as the pre-check, instead of a 500.
+            if ((error as { code?: string }).code === "23505") {
+              const [raceWinner] = await db
+                .select()
+                .from(accounts)
+                .where(
+                  and(
+                    eq(accounts.userId, auth.userId),
+                    sql`lower(trim(${accounts.name})) = ${normalizedName}`
+                  )
+                )
+                .limit(1);
+
+              if (raceWinner) {
+                return c.json({ data: raceWinner });
+              }
+            }
+
+            throw error;
+          }
         }
     )
     .post(
       "/bulk-delete",
-      clerkMiddleware(),
       zValidator(
         "json", 
         z.object({
@@ -113,11 +154,8 @@ const app = new Hono()
     )
     .patch(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
-      zValidator("json", insertAccountSchema.pick({
-        name: true,
-      })),
+      zValidator("json", accountNameSchema),
       async (c) => {
         const auth = getAuth(c);
         const { id } = c.req.valid("param");
@@ -132,7 +170,9 @@ const app = new Hono()
 
         const [data] = await db
           .update(accounts)
-          .set(values)
+          .set({
+            name: values.name.trim(),
+          })
           .where(
             and(
               eq(accounts.userId, auth.userId),
@@ -150,7 +190,6 @@ const app = new Hono()
     )
     .delete(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
       async (c) => {
         const auth = getAuth(c);

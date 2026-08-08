@@ -86,6 +86,13 @@ account/category sheet components, one unused `queryClient` in
 Not fixed here — out of scope for BUG-003/BUG-004, and touches several unrelated files.
 **Fix:** address each individually; the plaid one overlaps with BUG-009's TODO.
 
+### BUG-020 🔴 `npm run db:seed` is broken — `ts-node` isn't a dependency
+**Verified**, found incidentally while re-seeding for BUG-007. `package.json`'s
+`"db:seed": "ts-node scripts/seed.ts"` fails with `'ts-node' is not recognized` — the project
+uses `tsx` everywhere else (it's a devDependency; `ts-node` isn't). Worked around it for this
+session's re-seed by running `npx tsx scripts/seed.ts` directly.
+**Fix:** change the script to `"db:seed": "tsx scripts/seed.ts"`.
+
 ---
 
 ## Priority 2
@@ -142,14 +149,47 @@ defer.
 fixed)" spies on the real `lte` from drizzle-orm and asserts the `to` date it receives is
 `23:59:59`, not midnight.
 
-### BUG-007 🔴 Amounts stored as whole-dollar integer but UI accepts cents
-**Verified.** `db/schema.ts:53` — `amount: integer("amount")`. `components/amount-input.tsx`
-uses `react-currency-input-field` with `decimalScale={2}` / `decimalsLimit={2}`, i.e. the UI
-happily accepts `$12.34`. `insertTransactionSchema` only requires `z.number().finite()`, no
-integer constraint. A decimal amount sent to an `integer` column will error or be coerced —
-not stored as entered.
-**Fix:** migrate to storing cents. Expand-contract: add new column -> backfill -> switch
-reads/writes to it -> drop old column. Do not do a blind in-place type change.
+### BUG-007 🟢 Fixed 2026-08-08 — Amounts stored as whole-dollar integer but UI accepts cents
+**Verified.** `db/schema.ts` used `amount: integer("amount")`, which is fine for cents, but
+nothing enforced that the value stored there actually *was* cents.
+`components/amount-input.tsx` uses `react-currency-input-field` with `decimalScale={2}` /
+`decimalsLimit={2}`, i.e. the UI happily accepts `$12.34`. `insertTransactionSchema` only
+required `z.number().finite()`, no integer constraint. A decimal amount sent to an `integer`
+column would error or be coerced — not stored as entered.
+
+**Bigger finding while investigating:** the CSV import path
+(`app/(dashboard)/transactions/page.tsx`'s `parseCsvAmount`) already did
+`Math.round(parsedAmount * 100)` — i.e. it was **already** storing cents — while the manual
+`TransactionForm` path stored raw dollars. Two creation paths, two different units, silently.
+Checked the live dev DB's ~90 transactions before touching anything: found exact ×100
+duplicate pairs (e.g. Yandex Go at both `-5` and `-500`; Apteka 999 at both `-13` and
+`-1300`), confirming this wasn't theoretical — the data was already corrupted by the unit
+mismatch. Asked the user whether this was real financial data or disposable test data; they
+confirmed it was CSV test data written for testing, safe to clear rather than needing
+per-row unit forensics. Cleared `transactions` (accounts/categories, already deduplicated
+under BUG-005, were kept) and re-seeded with `scripts/seed.ts` (now cents-aware).
+
+**Fix applied** (no expand-contract needed — the column type doesn't change, only the
+semantic meaning, and there was no real data to preserve once confirmed disposable):
+- `lib/utils.ts`: added `convertAmountToCents`/`convertAmountFromCents` as the single source
+  of truth for the ×100 factor; `formatCurrency` now takes cents and divides internally.
+- `db/schema.ts`: `insertTransactionSchema.amount` is now `z.number().int(...)` — rejects any
+  non-integer amount reaching the API, closing the gap the original bug report described.
+- `features/transactions/components/new-transaction-sheet.tsx` /
+  `edit-transaction-sheet.tsx`: convert dollars → cents on submit, cents → dollars when
+  populating the edit form's `defaultValues`.
+- `app/(dashboard)/transactions/columns.tsx`: dropped its own separate `amountFormatter` in
+  favor of the shared `formatCurrency` (was already displaying raw un-formatted cents as if
+  they were dollars — a second, related display bug, fixed as part of the same change).
+  Same fix applied to the CSV import preview table in `page.tsx`.
+- `scripts/seed.ts`: `generateRandomAmount` now multiplies every branch by 100.
+- `parseCsvAmount` needed **no change** — it was already doing the right thing; this fix
+  brought the manual-entry path in line with it, not the other way around.
+**Test:** `db/schema.amount.test.ts` — flipped from documenting the bug to asserting the fix
+(`amount: 12.34` now rejected), plus new tests for the convert helpers and `formatCurrency`'s
+output (`formatCurrency(1234)` → `"$12.34"`).
+**Verified against the live DB:** re-ran the seed script; confirmed all 57 resulting
+transaction rows have `amount % 100 = 0` (whole cents).
 
 ### BUG-008 🟢 Fixed 2026-08-08 — `NEXT_PUBLIC_API_URL` missing env var crashes the whole app
 **Verified.** `lib/hono.ts` threw at **module import time** if the env var was unset. Since

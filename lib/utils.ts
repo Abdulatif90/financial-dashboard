@@ -19,11 +19,21 @@ const CATEGORY_COLORS = [
 ];
 
 
-export function formatCurrency(amount: number, currency: string = "USD") {
+// BUG-007: amounts are stored in cents (whole integers) so a $12.34 transaction round-trips
+// exactly, instead of an `integer` DB column silently truncating a fractional dollar amount.
+export function convertAmountToCents(amount: number) {
+    return Math.round(amount * 100);
+}
+
+export function convertAmountFromCents(amountInCents: number) {
+    return amountInCents / 100;
+}
+
+export function formatCurrency(amountInCents: number, currency: string = "USD") {
     return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency,
-    }).format(amount);
+    }).format(convertAmountFromCents(amountInCents));
 };
 
 export function getCategoryColor(name: string, index = 0) {

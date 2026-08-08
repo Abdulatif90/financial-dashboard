@@ -93,7 +93,9 @@ export const insertTransactionSchema = createInsertSchema(transactions, {
     accountId: z.string().trim().min(1, "Account is required"),
     categoryId: nullableText,
     payee: z.string().trim().min(1, "Payee is required"),
-    amount: z.number().finite(),
+    // BUG-007: amount is cents, so it must always be a whole number by the time it reaches
+    // this schema (the client converts dollars -> cents before sending).
+    amount: z.number().int("Amount must be a whole number of cents"),
     notes: nullableText,
 });
 

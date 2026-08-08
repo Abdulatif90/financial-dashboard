@@ -5,12 +5,12 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-005 fixed (user chose: merge duplicates); BUG-007 next, user chose: full
-cents migration
+2026-08-08 — BUG-007 fixed (money stored as cents). All of docs/BUGS.md Priority 1 and
+Priority 2 are now fixed.
 
 ## Current phase
-**Phase 2 — Fix bugs, in priority order** (see docs/PLAN.md). Phase 0 (foundation) and Phase 1
-(test infra) are done.
+**Phase 3 — Re-audit + README** is next (see docs/PLAN.md). Phase 0 (foundation), Phase 1
+(test infra), and Phase 2 (Priority 1 + Priority 2 bug fixes) are done.
 
 ## Done
 - Full code audit against a mentor's prioritized review; verified each claim against the
@@ -72,8 +72,22 @@ cents migration
   `POST /` now catches the unique-violation (code `23505`) and falls back to returning the
   existing row. Verified with a throwaway script that the constraint actually rejects a
   case/whitespace-insensitive duplicate.
+- **BUG-007 fixed**: investigated before mutating anything and found the manual-entry path
+  stored raw dollars while CSV import (`parseCsvAmount`) already stored cents -- confirmed via
+  the live DB's exact ×100 duplicate pairs (e.g. Yandex Go at `-5` and `-500`). Asked the user
+  whether the ~90 existing rows were real data; confirmed disposable CSV test data. Cleared
+  `transactions` (kept accounts/categories) and re-seeded. Added `convertAmountToCents`/
+  `convertAmountFromCents` to `lib/utils.ts` as the single conversion source of truth;
+  `formatCurrency` now divides by 100. `insertTransactionSchema.amount` now requires an
+  integer. Sheets convert on submit/load. Consolidated `transactions/columns.tsx`'s separate
+  (buggy, unformatted) `amountFormatter` into the shared `formatCurrency`, same fix applied
+  to the CSV preview table. `seed.ts` now generates cents. Verified: re-ran seed, confirmed
+  all 57 resulting rows have `amount % 100 = 0`.
+- Found BUG-020 incidentally: `npm run db:seed` references `ts-node`, not a real dependency —
+  worked around with `npx tsx scripts/seed.ts` for this session's re-seed.
 - Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002), `f430bff` (BUG-003/BUG-004),
-  `3cbdbf8` (BUG-006/BUG-008/BUG-018) — the BUG-005 fix is the next commit to land
+  `3cbdbf8` (BUG-006/BUG-008/BUG-018), `8492bf6` (BUG-005) — the BUG-007 fix is the next
+  commit to land
 - `.claude/skills/tekshir-finance/SKILL.md` created (invoke as `/tekshir-finance`) —
   project-scoped overseer workflow, adapted from the StudyMate `tekshir` skill to this repo's
   stack (vitest/tsc/eslint, docs/BUGS.md + docs/PLAN.md instead of StudyMate's docs/).
@@ -81,21 +95,20 @@ cents migration
   Also checks uncommitted changes and subagent/Task-tool work, not just git commits.
 
 ## Not done yet
-- **BUG-007 (money as cents)**: user picked "full migration" — multiply live `amount` values
-  by 100, update schema/validation/frontend/seed to work in cents. Not started yet, about to
-  begin. Same live-data caution as BUG-005 applies: back up/verify before mutating, confirm
-  reversibility.
 - BUG-019 (found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings) in
   files this session never touched — not fixed, out of scope
+- BUG-020 (found incidentally): `npm run db:seed` references `ts-node`, which isn't a
+  dependency (project uses `tsx` everywhere else) — not fixed, one-line fix, low priority
 - `npm run dev` not yet verified locally against real `.env` values
 - Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
+  (Phase 2 of docs/PLAN.md treats these as lower priority than core money-tracking)
+- Phase 3 (README tables, "Key design decisions" section) not started
 
 ## Next
-BUG-007: multiply the ~90 live transaction rows' `amount` by 100, then update
-`components/amount-input.tsx`/`features/transactions/components/transaction-form.tsx`
-(dollars-to-cents conversion on submit), `lib/utils.ts` `formatCurrency` (cents-to-dollars on
-display), `db/schema.ts` validation (reject non-integer amounts reaching the DB), and
-`scripts/seed.ts` (generate cents, not dollars, so future seeds match).
+Phase 3 per docs/PLAN.md: re-run the full suite (done, 14/14 pass), then add the
+Indexes/Security tables and "Key design decisions" section to README.md now that there's
+real, verified work to document — plus optionally BUG-019/BUG-020 (small, no live-data risk)
+and the deferred Plaid work (BUG-009..BUG-014).
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

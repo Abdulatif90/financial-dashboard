@@ -28,7 +28,7 @@ import { DataTable } from "@/components/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UploadButton } from "./upload-button";
 import { client } from "@/lib/hono";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import {
     Table,
     TableBody,
@@ -79,10 +79,6 @@ type ImportSummary = {
 const REQUIRED_IMPORT_FIELDS = ["date", "account", "payee", "amount"] as const;
 
 const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[\s_-]+/g, "");
-const amountFormatter = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-});
 
 const getCsvValue = (row: CsvRow, aliases: string[]) => {
     const normalizedAliases = aliases.map(normalizeHeader);
@@ -560,7 +556,7 @@ const TransactionsPageContent = () => {
                                         <TableCell>{row.payee || "-"}</TableCell>
                                         <TableCell>
                                             {row.normalized
-                                                ? amountFormatter.format(row.normalized.amount)
+                                                ? formatCurrency(row.normalized.amount)
                                                 : row.amount || "-"}
                                         </TableCell>
                                         <TableCell>{row.notes || "-"}</TableCell>

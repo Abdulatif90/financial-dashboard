@@ -311,10 +311,18 @@ BUG-005 duplicate-prevention precedent already in this file. `plaid.ts`'s
 Migration: `drizzle/0008_eminent_juggernaut.sql`, generated via `npx drizzle-kit generate`,
 applied via `npx drizzle-kit migrate` — applied cleanly.
 
-### BUG-014 🔴 `PLAID_ENV` documented but unused
-**Verified.** README.md lists `PLAID_ENV` as a required env var, but `plaid.ts:11-12`
-hardcodes `basePath: PlaidEnvironments.sandbox`. The env var has no effect. Either wire it up
-or drop it from the documented env list — currently it's a docs/code mismatch, low priority.
+### BUG-014 🟢 Fixed 2026-08-08 — `PLAID_ENV` documented but unused
+**Verified.** README.md lists `PLAID_ENV` as a required env var, but `plaid.ts` hardcoded
+`basePath: PlaidEnvironments.sandbox`. The env var had no effect.
+**Fix applied:** `plaidEnv = process.env.PLAID_ENV === "production" ? "production" : "sandbox"`,
+used as `PlaidEnvironments[plaidEnv]`. Checked the installed `plaid` SDK directly
+(`node_modules/plaid/dist/configuration.js`) rather than assuming — this version's
+`PlaidEnvironments` only exposes `sandbox` and `production` (no `development`), so those are
+the only two valid values; anything else (including unset) falls back to `sandbox`.
+**Verified:** `tsc --noEmit` clean, `vitest run` 18/18, `eslint` on the file clean. Fixed
+directly (not via subagent dispatch) — small, single-file, no live-DB/Plaid-network risk, and
+the concurrent BUG-011 dispatch that would normally own this file was blocked on a session
+usage limit at the time.
 
 ---
 

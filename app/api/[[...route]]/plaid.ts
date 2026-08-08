@@ -8,8 +8,14 @@ import { db } from "@/db/drizzle";
 import { connectedBanks } from "@/db/schema";
 import { createId } from "@paralleldrive/cuid2";
 
+// BUG-014: PLAID_ENV was documented (README, .env) but never read -- basePath was hardcoded
+// to sandbox regardless of the env var's value. The installed `plaid` SDK only exposes
+// `sandbox` and `production` in PlaidEnvironments (verified: node_modules/plaid/dist/
+// configuration.js -- no `development` key in this version).
+const plaidEnv = process.env.PLAID_ENV === "production" ? "production" : "sandbox";
+
 const configuration = new Configuration({
-    basePath: PlaidEnvironments.sandbox,
+    basePath: PlaidEnvironments[plaidEnv],
     baseOptions: {
         headers: {
             "PLAID-CLIENT-ID": process.env.PLAID_CLIENT_ID!,

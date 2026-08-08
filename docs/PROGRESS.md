@@ -171,28 +171,58 @@ redo it** — see "Next". What's left otherwise: the CV/portfolio text update ("
   (14 pre-existing + 4 new), `npx eslint .` → 0 errors / 1 warning (only the pre-existing
   `data-table.tsx` React Compiler warning remains — the `use-exchange-public-token.ts` warning
   is gone now that BUG-009 is fixed).
+- **Reviewed BUG-009/010/012/013 via `/tekshir-finance`**: independently re-ran `tsc`/
+  `vitest`/`eslint` (matched the builder's claimed numbers exactly), read every diff across
+  all 4 commits in full (schema+migration, backend endpoints, frontend wiring, docs), spot
+  checked the ownership-scoping pattern in `plaid.ts` and the test file against
+  `transactions.ownership.test.ts`'s established pattern. **Verdict: accepted, no
+  deviations.**
+- **Dispatched BUG-011 + BUG-014 together** (🔴 opus tier — first implementation of an
+  external sync integration) with verified Plaid facts (transactionsSync shape, confirmed
+  amount is major-currency-unit not cents, confirmed sign convention is inverted from this
+  app's) and pre-made design decisions (account/category mapping via the already-existing,
+  previously-unused `plaidId` columns on `accounts`/`categories`; Plaid `transaction_id`
+  reused as this app's `transactions.id` for idempotent upserts; nullable `cursor` column on
+  `connectedBanks`). **The dispatch failed**: the subagent hit its session usage limit almost
+  immediately ("resets 9:50pm Asia/Seoul"). Before failing it produced one real artifact:
+  `lib/plaid-mapping.ts` — reviewed, correct, and committed (see below) — but no route
+  wiring, no schema change, no tests.
+- **Found + fixed BUG-021** while verifying `npm run dev` for the first time this session
+  (a "Next" item carried over from earlier): every API route 500'd with `Error: Missing
+  Clerk Publishable key`. Root cause: `@hono/clerk-auth` reads a separate
+  `CLERK_PUBLISHABLE_KEY` env var (no `NEXT_PUBLIC_` prefix) that was never set — `.env` only
+  had the `@clerk/nextjs`-frontend `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` plus an unrelated
+  typo'd dead variable (`CLERK_PUBLICABLE_KEY`, missing an "H"). This was invisible to
+  `tsc`/`vitest`/`eslint` all session — none of them boot the real server. Fixed `.env`,
+  verified `GET /api/accounts` now returns `401` (correct) instead of `500`; `/` and
+  `/sign-in` both render `200`.
+- **Fixed BUG-014 directly** (not via subagent — small, single-file, no live-DB/Plaid-network
+  risk, and the file's "natural" owner, the BUG-011 dispatch, was blocked on the session
+  limit): `plaid.ts` now reads `PLAID_ENV`, mapping to `PlaidEnvironments[plaidEnv]`
+  (`sandbox`/`production` — checked the installed SDK directly, this version has no
+  `development` key), defaulting to `sandbox`. Verified `tsc`/`vitest`/`eslint` clean.
+- Committed: `c81a536`/`e4cba7c`/`9dfdc46`/`f172caf` (BUG-009/010/012/013), `1790bae`
+  (BUG-021 + salvaged `lib/plaid-mapping.ts`) — the BUG-014 fix is the next commit to land.
 
 ## Not done yet
 - BUG-011 (transaction sync/import) — design decisions already made and verified against
-  Plaid's real API (see the failed dispatch's prompt / this file's "Next" section), partially
-  built (`lib/plaid-mapping.ts`), but not wired up, not tested, not committed. Blocked on
-  re-dispatching after the session limit resets.
-- BUG-014 (PLAID_ENV docs mismatch) — trivial, still open, was bundled with the failed BUG-011
-  dispatch
+  Plaid's real API (see this file's "Next" section), partially built
+  (`lib/plaid-mapping.ts`, committed), but not wired up, not tested. Blocked on re-dispatching
+  after the session limit resets.
 - `components/data-table.tsx`'s React Compiler "incompatible library" warning
   (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
 - CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item) — not
   actionable from this repo, no CV file exists here
 
 ## Next
-1. **Re-dispatch BUG-011 + BUG-014** once the session usage limit resets (9:50pm Asia/Seoul,
-   2026-08-08). Point the new builder at the existing `lib/plaid-mapping.ts` (untracked,
+1. **Re-dispatch BUG-011** once the session usage limit resets (9:50pm Asia/Seoul,
+   2026-08-08). Point the new builder at the existing `lib/plaid-mapping.ts` (committed,
    already correct and reviewed) instead of having it redo that work — the design decisions
    (account/category mapping via the existing-but-unused `plaidId` columns, transaction-id
    reuse for idempotency, amount sign flip, cursor persistence) were already made and verified
    against Plaid's real docs; the new builder should implement the sync endpoint + cursor
-   column + tests + BUG-014's `PLAID_ENV` wiring on top of the existing mapping file, not
-   re-derive the design.
+   column + tests on top of the existing mapping file, not re-derive the design. (BUG-014,
+   originally bundled with this dispatch, is done — fixed directly, see "Done".)
 2. CV/portfolio text update — outside this repo's scope, needs the user directly.
 
 ## Notes

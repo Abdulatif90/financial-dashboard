@@ -103,4 +103,15 @@ export const connectedBanks = pgTable("connected_banks", {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     accessToken: text("access_token").notNull(),
-});
+    // BUG-013: Plaid webhooks and item management (including future sync cursors, disconnect
+    // via itemRemove) key off item_id, which wasn't stored before this.
+    itemId: text("item_id").notNull(),
+}, (table) => [
+    index("connected_banks_user_id_idx").on(table.userId),
+    // One row per Plaid Item: itemPublicTokenExchange is only ever called once per successful
+    // Link flow for a given Item, and re-exchanging would produce a new access_token for the
+    // same underlying Item. A unique index on item_id prevents the same Item being stored
+    // twice (e.g. a double-submitted exchange-public-token request), mirroring the BUG-005
+    // duplicate-prevention pattern already used for accounts/categories names.
+    uniqueIndex("connected_banks_item_id_unique_idx").on(table.itemId),
+]);

@@ -106,6 +106,11 @@ export const connectedBanks = pgTable("connected_banks", {
     // BUG-013: Plaid webhooks and item management (including future sync cursors, disconnect
     // via itemRemove) key off item_id, which wasn't stored before this.
     itemId: text("item_id").notNull(),
+    // BUG-011: Plaid's /transactions/sync is cursor-based -- each response returns a
+    // `next_cursor` that must be persisted and replayed on the next sync so we only ever pull
+    // the delta. Nullable: NULL means "never synced", which is exactly what Plaid wants
+    // (omitting `cursor` entirely returns the full history from the beginning).
+    cursor: text("cursor"),
 }, (table) => [
     index("connected_banks_user_id_idx").on(table.userId),
     // One row per Plaid Item: itemPublicTokenExchange is only ever called once per successful

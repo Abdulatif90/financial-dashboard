@@ -108,6 +108,39 @@ const app = new Hono()
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const [account] = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                eq(accounts.id, values.accountId)
+              )
+            )
+            .limit(1);
+
+          if (!account) {
+            return c.json({ message: "Account not found" }, 404);
+          }
+
+          if (values.categoryId) {
+            const [category] = await db
+              .select({ id: categories.id })
+              .from(categories)
+              .where(
+                and(
+                  eq(categories.userId, auth.userId),
+                  eq(categories.id, values.categoryId)
+                )
+              )
+              .limit(1);
+
+            if (!category) {
+              return c.json({ message: "Category not found" }, 404);
+            }
+          }
+
           const [data] = await db.insert(transactions).values({
             id: createId(),
             ...values,
@@ -128,6 +161,47 @@ const app = new Hono()
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const accountIds = Array.from(new Set(values.map((value) => value.accountId)));
+
+          const ownedAccounts = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                inArray(accounts.id, accountIds)
+              )
+            );
+
+          if (ownedAccounts.length !== accountIds.length) {
+            return c.json({ message: "One or more accounts not found" }, 404);
+          }
+
+          const categoryIds = Array.from(
+            new Set(
+              values
+                .map((value) => value.categoryId)
+                .filter((categoryId): categoryId is string => Boolean(categoryId))
+            )
+          );
+
+          if (categoryIds.length > 0) {
+            const ownedCategories = await db
+              .select({ id: categories.id })
+              .from(categories)
+              .where(
+                and(
+                  eq(categories.userId, auth.userId),
+                  inArray(categories.id, categoryIds)
+                )
+              );
+
+            if (ownedCategories.length !== categoryIds.length) {
+              return c.json({ message: "One or more categories not found" }, 404);
+            }
+          }
+
           const data = await db.insert(transactions).values(
             values.map((value) => ({
               id: createId(),
@@ -193,6 +267,38 @@ const app = new Hono()
         }
         if (!auth.userId) {
           return c.json({ error: "Unauthorized" }, 401);
+        }
+
+        const [account] = await db
+          .select({ id: accounts.id })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.userId, auth.userId),
+              eq(accounts.id, values.accountId)
+            )
+          )
+          .limit(1);
+
+        if (!account) {
+          return c.json({ error: "Account not found" }, 404);
+        }
+
+        if (values.categoryId) {
+          const [category] = await db
+            .select({ id: categories.id })
+            .from(categories)
+            .where(
+              and(
+                eq(categories.userId, auth.userId),
+                eq(categories.id, values.categoryId)
+              )
+            )
+            .limit(1);
+
+          if (!category) {
+            return c.json({ error: "Category not found" }, 404);
+          }
         }
 
         const transactionsToUpdate = db.$with("transactions_to_delete").as(db.select({ id: transactions.id }).from(transactions)

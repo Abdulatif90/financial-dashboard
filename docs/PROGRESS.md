@@ -206,9 +206,12 @@ redo it** — see "Next". What's left otherwise: the CV/portfolio text update ("
 
 ## Not done yet
 - BUG-011 (transaction sync/import) — design decisions already made and verified against
-  Plaid's real API (see this file's "Next" section), partially built
-  (`lib/plaid-mapping.ts`, committed), but not wired up, not tested. Blocked on re-dispatching
-  after the session limit resets.
+  Plaid's real API. **Correction**: the failed dispatch made more progress than its cut-off
+  final report suggested — it also committed `3575513` (`cursor: text("cursor")` added to
+  `connected_banks`, migration `drizzle/0009_mysterious_namorita.sql` generated + applied,
+  independently re-verified against the live DB: column exists, nullable, table still 0
+  rows) before hitting the session limit. So both `lib/plaid-mapping.ts` AND the `cursor`
+  column already exist — only the `/sync` endpoint, frontend wiring, and tests remain.
 - `components/data-table.tsx`'s React Compiler "incompatible library" warning
   (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
 - CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item) — not

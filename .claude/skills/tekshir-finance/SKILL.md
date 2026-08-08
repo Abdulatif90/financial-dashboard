@@ -30,6 +30,13 @@ This project's workflow has two roles that must not blur into one session:
    dispatches it via the `Agent` tool (`subagent_type: "general-purpose"` or `"claude"` —
    never `"overseer"`, that type has no write tools and cannot build anything). Run it in the
    background (the default) unless the user is explicitly waiting on the result right now.
+   **Pick the model to match the work**, using the same 🟢/🔴 split Step 6 reports with:
+   pattern work — applying an established fix to another route/file, docs, lint cleanup,
+   anything with a clear precedent already in the codebase — gets `model: "sonnet"`; novel or
+   security-sensitive work — a new design (e.g. the Plaid transaction-sync endpoint, BUG-009
+   through BUG-013), anything touching auth/ownership logic for the first time, an
+   irreversible live-data decision — gets `model: "opus"`. Say which tier and why in the
+   prompt's own framing, not just in your head.
 2. **Builder** (the dispatched subagent) does the actual implementation: edits code, runs
    `tsc`/`vitest`/`eslint`, updates `docs/BUGS.md` + `docs/PROGRESS.md`, commits. It starts
    cold — it has none of this conversation's context, so the prompt you hand it must carry

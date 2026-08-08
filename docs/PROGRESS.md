@@ -5,6 +5,16 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
+2026-08-09 — **README diagrams added**: replaced the plain-text ASCII architecture diagram
+with a Mermaid `flowchart`, and added a database ER diagram (`erDiagram`) and two sequence
+diagrams (Plaid connect+sync flow, and the ownership-check flow on `POST /transactions`) — all
+placed between "🏗 Architecture" and "⚙️ Installation". Every diagram was grounded in the real
+code (`db/schema.ts`, `app/api/[[...route]]/{app,plaid,transactions}.ts`,
+`lib/plaid-mapping.ts`, `features/plaid/**`) read directly, not idealized. All four diagrams
+were extracted and rendered to SVG with `@mermaid-js/mermaid-cli` (`mmdc`) to confirm valid
+Mermaid syntax before committing — all four rendered cleanly. `npx tsc --noEmit` clean,
+`npx vitest run` 38/38 (unaffected, README-only change). Docs-only, no source files touched.
+
 2026-08-08 — **BUG-011 fixed** (retry dispatch, built on the two artifacts the failed first
 attempt left behind): `POST /api/plaid/sync`, account/category find-or-create, upsert/delete
 loop, frontend wiring, 19 new tests. Every Plaid bug (BUG-009..BUG-014) is now 🟢. Earlier the

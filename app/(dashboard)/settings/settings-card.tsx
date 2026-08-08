@@ -8,11 +8,18 @@ import {
 } from "@/components/ui/card";
 
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PlaidConnect } from "@/features/plaid/components/plaid-connect";
+import { useGetPlaidStatus } from "@/features/plaid/api/use-get-plaid-status";
+import { useDisconnectBank } from "@/features/plaid/api/use-disconnect-bank";
 
 export const SettingsCard = () => {
-    const connectBank = null;
+    const plaidStatus = useGetPlaidStatus();
+    const disconnectBank = useDisconnectBank();
+
+    const connectBank = plaidStatus.data?.connected ?? false;
+
     return (
         <Card className="border-none drop-shadow-sm">
             <CardHeader>
@@ -32,7 +39,18 @@ export const SettingsCard = () => {
                     )}>
                         {connectBank ? "Bank account connected" : "No bank account connected"}
                     </div>
-                    <PlaidConnect/>
+                    {connectBank ? (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={disconnectBank.isPending}
+                            onClick={() => disconnectBank.mutate()}
+                        >
+                            Disconnect
+                        </Button>
+                    ) : (
+                        <PlaidConnect/>
+                    )}
                 </div>
             </CardContent>
         </Card>

@@ -5,15 +5,25 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-009, BUG-010, BUG-012, BUG-013 fixed (Plaid `item_id` storage, disconnect
-endpoint + UI, real connection-status endpoint + UI, exchange-public-token query invalidation).
-BUG-011 (transaction sync) and BUG-014 (`PLAID_ENV` docs mismatch) remain deferred/open.
+2026-08-08 — BUG-009/010/012/013 fixed and reviewed (accepted, `/tekshir-finance`); BUG-021
+found+fixed via actually running `npm run dev` for the first time this session; BUG-011+014
+dispatch **failed** (subagent hit its session usage limit, resets 9:50pm Asia/Seoul) —
+retry needed.
 
 ## Current phase
-**Phase 3 — Re-audit + README** is done. Most of the deferred Plaid gaps (BUG-009, BUG-010,
-BUG-012, BUG-013) are now fixed too. What's left is the CV/portfolio text update ("audited" ->
-"fixed"), BUG-011 (transaction sync — deliberately out of scope for this dispatch, needs new
-design decisions), and BUG-014 (`PLAID_ENV` docs mismatch, trivial) — see "Next" below.
+**Phase 3 — Re-audit + README** is done. BUG-009/010/012/013 are fixed and independently
+reviewed (see the `/tekshir-finance` review below — accepted, no deviations). BUG-021 (a real
+runtime bug, not caught by `tsc`/`vitest`/`eslint`) was found and fixed while verifying
+`npm run dev`. **BUG-011 + BUG-014 were dispatched together but the builder subagent failed**
+("Agent terminated early due to an API error: You've hit your session limit · resets 9:50pm
+(Asia/Seoul)") — before failing it did produce one real, usable artifact:
+`lib/plaid-mapping.ts` (untracked, uncommitted) — pure Plaid-transaction-to-local-schema
+mapping helpers (`plaidAmountToCents`, `mapPlaidTransaction`, `titleCasePlaidCategory`,
+`plaidAccountName`), reviewed and correct (amount sign-flip verified against the spec: a $12
+Plaid purchase (`12`) maps to `-1200`, matching this app's expense convention). No route
+wiring, no tests, nothing committed yet. **The retry dispatch must reuse this file, not
+redo it** — see "Next". What's left otherwise: the CV/portfolio text update ("audited" ->
+"fixed", not actionable from this repo).
 
 ## Done
 - Full code audit against a mentor's prioritized review; verified each claim against the
@@ -163,21 +173,27 @@ design decisions), and BUG-014 (`PLAID_ENV` docs mismatch, trivial) — see "Nex
   is gone now that BUG-009 is fixed).
 
 ## Not done yet
-- `npm run dev` not yet verified locally against real `.env` values
-- BUG-011 (transaction sync/import — deliberately deferred, needs new design decisions around
-  mapping Plaid accounts/categories onto local rows; not part of this dispatch)
-- BUG-014 (PLAID_ENV docs mismatch) — trivial, still open
+- BUG-011 (transaction sync/import) — design decisions already made and verified against
+  Plaid's real API (see the failed dispatch's prompt / this file's "Next" section), partially
+  built (`lib/plaid-mapping.ts`), but not wired up, not tested, not committed. Blocked on
+  re-dispatching after the session limit resets.
+- BUG-014 (PLAID_ENV docs mismatch) — trivial, still open, was bundled with the failed BUG-011
+  dispatch
 - `components/data-table.tsx`'s React Compiler "incompatible library" warning
   (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
-- CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item)
+- CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item) — not
+  actionable from this repo, no CV file exists here
 
 ## Next
-What's left, in priority order: (1) verify `npm run dev` locally against the real `.env`
-(note: `NEXT_PUBLIC_API_URL` currently points at the production Vercel URL, not localhost —
-see "Notes" below), (2) update CV/portfolio text from "audited" to "fixed", (3) BUG-011
-(transaction sync via Plaid's `transactionsSync`) as its own dispatch — it needs design
-decisions this session deliberately didn't make, (4) BUG-014 (PLAID_ENV docs mismatch, trivial,
-can batch with anything else touching `plaid.ts`).
+1. **Re-dispatch BUG-011 + BUG-014** once the session usage limit resets (9:50pm Asia/Seoul,
+   2026-08-08). Point the new builder at the existing `lib/plaid-mapping.ts` (untracked,
+   already correct and reviewed) instead of having it redo that work — the design decisions
+   (account/category mapping via the existing-but-unused `plaidId` columns, transaction-id
+   reuse for idempotency, amount sign flip, cursor persistence) were already made and verified
+   against Plaid's real docs; the new builder should implement the sync endpoint + cursor
+   column + tests + BUG-014's `PLAID_ENV` wiring on top of the existing mapping file, not
+   re-derive the design.
+2. CV/portfolio text update — outside this repo's scope, needs the user directly.
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

@@ -341,6 +341,30 @@ Tracked as work, not bugs: see docs/PLAN.md "Tier 3 — tests" for the specific 
 Any *new* bug a test uncovers gets appended here with the next BUG-0xx number, in the section
 that matches its priority.
 
+### BUG-021 🟢 Fixed 2026-08-08 — `@hono/clerk-auth` needs `CLERK_PUBLISHABLE_KEY`, a separate env var from the Next.js one
+**Verified by actually running `npm run dev` for the first time this session** (previously
+only `tsc`/`vitest`/`eslint` had been checked — none of those exercise the Clerk middleware at
+runtime). Every API route 500'd with `Error: Missing Clerk Publishable key`, even though
+`.env` had `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` set correctly.
+**Root cause:** `node_modules/@hono/clerk-auth/dist/index.js` reads `CLERK_PUBLISHABLE_KEY`
+(no `NEXT_PUBLIC_` prefix) directly — a different variable from the one `@clerk/nextjs`'s
+frontend `ClerkProvider` reads (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`). Both are required, same
+value, two different consumers, and this was never documented anywhere (not in README, not in
+the original BUG-016 `.env` template). `.env` also had a typo'd, dead `CLERK_PUBLICABLE_KEY`
+(missing an "H") that nothing ever read — likely someone's earlier attempt to add exactly this
+variable, misspelled.
+**Fix applied:** added `CLERK_PUBLISHABLE_KEY` to `.env` (same value as
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), removed the dead typo'd variable, documented why both
+exist directly in `.env`'s comments.
+**Verified:** restarted `npm run dev`, `GET /api/accounts` went from `500` (`Missing Clerk
+Publishable key`) to `401 Unauthorized` (the correct response for an unauthenticated
+request) — confirmed via the actual server log, not assumed. `/` and `/sign-in` both render
+`200`.
+**Lesson:** `tsc`/`vitest`/`eslint` all passed the whole session while this was broken —
+none of them boot the actual Next.js server or exercise `@hono/clerk-auth`'s middleware.
+`npm run dev` should be checked at least once per session that touches auth-adjacent config,
+not assumed fine because the automated checks are green.
+
 ---
 
 ## Deliberately left open (documented trade-offs, not gaps)

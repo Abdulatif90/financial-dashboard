@@ -5,14 +5,15 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — Phase 3 done: README.md Indexes/Security tables + "Key design decisions" section
-added, BUG-019 (`npm run lint`) and BUG-020 (`npm run db:seed`) fixed.
+2026-08-08 — BUG-009, BUG-010, BUG-012, BUG-013 fixed (Plaid `item_id` storage, disconnect
+endpoint + UI, real connection-status endpoint + UI, exchange-public-token query invalidation).
+BUG-011 (transaction sync) and BUG-014 (`PLAID_ENV` docs mismatch) remain deferred/open.
 
 ## Current phase
-**Phase 3 — Re-audit + README** is done. What's left is the CV/portfolio text update
-("audited" -> "fixed") and the deferred Plaid gaps (BUG-009..BUG-014) — see "Next" below.
-Phase 0 (foundation), Phase 1 (test infra), and Phase 2 (Priority 1 + Priority 2 bug fixes)
-were already done coming into this session.
+**Phase 3 — Re-audit + README** is done. Most of the deferred Plaid gaps (BUG-009, BUG-010,
+BUG-012, BUG-013) are now fixed too. What's left is the CV/portfolio text update ("audited" ->
+"fixed"), BUG-011 (transaction sync — deliberately out of scope for this dispatch, needs new
+design decisions), and BUG-014 (`PLAID_ENV` docs mismatch, trivial) — see "Next" below.
 
 ## Done
 - Full code audit against a mentor's prioritized review; verified each claim against the
@@ -123,22 +124,60 @@ were already done coming into this session.
   during the BUG-007 session.
 - Verified after all of the above: `npx tsc --noEmit` clean, `npx eslint .` → 0 errors / 2
   warnings (the two explicitly left-as-is), `npx vitest run` → 14/14 passing.
+- **BUG-013 fixed**: `db/schema.ts`'s `connectedBanks` table gained `itemId: text("item_id")
+  .notNull()`, an index on `userId` (same pattern as `accounts`/`categories`), and a
+  `uniqueIndex` on `itemId` (mirrors BUG-005's duplicate-prevention precedent — an Item should
+  never be stored twice). Verified the table was empty (0 rows) against the live DB, both
+  before generating the migration and again immediately before applying it, so the new
+  `NOT NULL` column needed no backfill. `plaid.ts`'s `/exchange-public-token` now captures and
+  stores `exchange.data.item_id`. Migration `drizzle/0008_eminent_juggernaut.sql` generated via
+  `npx drizzle-kit generate`, applied via `npx drizzle-kit migrate` — applied cleanly.
+- **BUG-012 fixed**: added `POST /api/plaid/disconnect` — ownership-scoped select
+  (`eq(connectedBanks.userId, auth.userId)`), 404 if the caller has no connected bank, calls
+  `client.itemRemove({ access_token })` per row, deletes the row only after `itemRemove`
+  succeeds. Added `features/plaid/api/use-disconnect-bank.ts` (mutation hook, same structure as
+  `use-exchange-public-token.ts`) and a "Disconnect" button in `settings-card.tsx`, shown in
+  place of "Connect" when a bank is connected.
+- **BUG-010 fixed**: added `GET /api/plaid/status` — ownership-scoped
+  (`eq(connectedBanks.userId, auth.userId)`, `limit(1)`), returns `{ data: { connected: bool
+  } }` from `connected_banks` directly (no live Plaid call needed — our own table is the
+  source of truth). Added `features/plaid/api/use-get-plaid-status.ts` (`useQuery`, key
+  `["plaid-status"]`, same pattern as `use-get-accounts.ts`). `settings-card.tsx`'s hardcoded
+  `const connectBank = null;` replaced with this query's result.
+- **BUG-009 fixed**: `use-exchange-public-token.ts`'s `onSuccess` TODO replaced with
+  `queryClient.invalidateQueries({ queryKey: ["plaid-status"] })` — also naturally resolved the
+  BUG-019-documented unused-`queryClient` eslint warning, since the variable is now used.
+- New test file `app/api/[[...route]]/plaid.ownership.test.ts` (4 tests): ownership regression
+  for `/status` (calls `eq(connectedBanks.userId, "user_me")`, returns the right
+  `connected` value both ways) and `/disconnect` (404 + no `itemRemove` call when nothing is
+  connected; `itemRemove` called with the right `access_token` plus the ownership `eq` call
+  when something is). `plaid`'s `PlaidApi` class is mocked (keeping `Configuration`/
+  `PlaidEnvironments`/etc. real via `importOriginal`, since those don't make network calls) so
+  no real Plaid API call happens in tests.
+- Did **not** touch BUG-011 (transaction sync) scope: no `transactionsSync` call, no
+  Plaid-account-to-local-account mapping, no `cursor` column added anywhere — explicitly out of
+  scope per this dispatch's instructions.
+- Verified after all Plaid changes: `npx tsc --noEmit` clean, `npx vitest run` → 18/18 passing
+  (14 pre-existing + 4 new), `npx eslint .` → 0 errors / 1 warning (only the pre-existing
+  `data-table.tsx` React Compiler warning remains — the `use-exchange-public-token.ts` warning
+  is gone now that BUG-009 is fixed).
 
 ## Not done yet
 - `npm run dev` not yet verified locally against real `.env` values
-- Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
-  (Phase 2 of docs/PLAN.md treats these as lower priority than core money-tracking)
+- BUG-011 (transaction sync/import — deliberately deferred, needs new design decisions around
+  mapping Plaid accounts/categories onto local rows; not part of this dispatch)
+- BUG-014 (PLAID_ENV docs mismatch) — trivial, still open
 - `components/data-table.tsx`'s React Compiler "incompatible library" warning
   (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
-- `features/plaid/api/use-exchange-public-token.ts`'s unused `queryClient` — deliberately left
-  open, tied to BUG-009's unfinished query-invalidation TODO (deferred Plaid work)
 - CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item)
 
 ## Next
-Phase 3 is complete. What's left, in priority order: (1) verify `npm run dev` locally against
-the real `.env` (note: `NEXT_PUBLIC_API_URL` currently points at the production Vercel URL,
-not localhost — see "Notes" below), (2) update CV/portfolio text from "audited" to "fixed",
-(3) optionally pick up the deferred Plaid work (BUG-009..BUG-014) if it becomes a priority.
+What's left, in priority order: (1) verify `npm run dev` locally against the real `.env`
+(note: `NEXT_PUBLIC_API_URL` currently points at the production Vercel URL, not localhost —
+see "Notes" below), (2) update CV/portfolio text from "audited" to "fixed", (3) BUG-011
+(transaction sync via Plaid's `transactionsSync`) as its own dispatch — it needs design
+decisions this session deliberately didn't make, (4) BUG-014 (PLAID_ENV docs mismatch, trivial,
+can batch with anything else touching `plaid.ts`).
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

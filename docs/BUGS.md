@@ -245,26 +245,71 @@ real drizzle/neon client objects).
 
 ## Plaid integration — incomplete (found during initial resume, 2026-08-08)
 
-### BUG-009 🔴 No query invalidation / state update after bank connect
-**Verified.** `features/plaid/api/use-exchange-public-token.ts:25-28` — `onSuccess` has a
-bare `// TODO`, nothing is invalidated or refetched after a successful connect.
+### BUG-009 🟢 Fixed 2026-08-08 — No query invalidation / state update after bank connect
+**Verified.** `features/plaid/api/use-exchange-public-token.ts:25-28` — `onSuccess` had a
+bare `// TODO`, nothing was invalidated or refetched after a successful connect.
+**Fix applied:** `onSuccess` now invalidates the `["plaid-status"]` query key (the one
+`use-get-plaid-status.ts`, added for BUG-010, uses), so the Settings UI flips to "Bank account
+connected" immediately after a successful Plaid Link flow, no manual refresh needed. This also
+naturally resolved BUG-019's leftover `queryClient`-unused-variable eslint warning, since the
+variable is now actually used.
 
-### BUG-010 🔴 `connectBank` hardcoded to `null` in Settings UI
+### BUG-010 🟢 Fixed 2026-08-08 — `connectBank` hardcoded to `null` in Settings UI
 **Verified.** `app/(dashboard)/settings/settings-card.tsx:15` — `const connectBank = null;`.
-There is no GET endpoint to check real connection status, so the UI can never show "Bank
-account connected" even when one is.
+There was no GET endpoint to check real connection status, so the UI could never show "Bank
+account connected" even when one existed.
+**Fix applied:** added `GET /api/plaid/status` (`plaid.ts`) — ownership-scoped
+(`eq(connectedBanks.userId, auth.userId)`, `limit(1)`), returns `{ data: { connected: boolean
+} }` from our own `connected_banks` table (no live Plaid call needed, since that table is
+already the source of truth for whether *we* consider the user connected). Added
+`features/plaid/api/use-get-plaid-status.ts` (`useQuery`, key `["plaid-status"]`, same pattern
+as `use-get-accounts.ts`). `settings-card.tsx` now derives `connectBank` from this query
+instead of the hardcoded `null`.
+**Test:** `app/api/[[...route]]/plaid.ownership.test.ts` — "GET /plaid/status ownership"
+asserts the route calls `eq(connectedBanks.userId, "user_me")` and returns
+`connected: false`/`true` correctly depending on row presence.
 
 ### BUG-011 🔴 No transaction sync/import endpoint
 **Verified.** `app/api/[[...route]]/plaid.ts` only has `create-link-token` and
 `exchange-public-token`. README.md claims "Import transactions automatically" / "Sync
 financial data" — no `transactionsSync` call or endpoint backs that claim anywhere in the repo.
+**Deliberately out of scope for the BUG-009/010/012/013 dispatch** — requires new design
+decisions (mapping Plaid accounts/categories onto local rows, a sync cursor column) that
+dispatch's prompt explicitly did not resolve. Still open.
 
-### BUG-012 🔴 No disconnect/unlink-bank flow
-**Verified.** No delete/unlink endpoint or UI action exists for `connectedBanks` rows.
+### BUG-012 🟢 Fixed 2026-08-08 — No disconnect/unlink-bank flow
+**Verified.** No delete/unlink endpoint or UI action existed for `connectedBanks` rows.
+**Fix applied:** added `POST /api/plaid/disconnect` (`plaid.ts`) — ownership-scoped select
+(`eq(connectedBanks.userId, auth.userId)`), 404 if the caller has no connected bank, otherwise
+calls `client.itemRemove({ access_token })` for each row found (Plaid's real API is not
+called in tests — see `plaid.ownership.test.ts`) and, only after a successful `itemRemove`,
+deletes that row from `connected_banks`. Added
+`features/plaid/api/use-disconnect-bank.ts` (mutation hook, same structure as
+`use-exchange-public-token.ts`), invalidates `["plaid-status"]` on success. `settings-card.tsx`
+now shows a "Disconnect" button in place of the "Connect" button when a bank is connected
+(derived from the BUG-010 status query).
+**Test:** `plaid.ownership.test.ts` — "POST /plaid/disconnect ownership" asserts 404 with no
+connected bank (and that `itemRemove` is never called in that case), and asserts `itemRemove`
+is called with the right `access_token` plus `eq(connectedBanks.userId, "user_me")` when a
+bank is connected.
 
-### BUG-013 🔴 `connectedBanks` table missing `itemId`
+### BUG-013 🟢 Fixed 2026-08-08 — `connectedBanks` table missing `itemId`
 **Verified.** `db/schema.ts:87-91` — only `id`, `userId`, `accessToken`. Plaid webhooks and
-item management (including sync cursors, disconnect) key off `item_id`, which isn't stored.
+item management (including sync cursors, disconnect) key off `item_id`, which wasn't stored.
+**Verified the table was empty (0 rows) before migrating** — checked directly against the live
+DB both before generating the migration and again immediately before applying it, so no
+backfill/data-loss concern for the new `NOT NULL` column.
+**Fix applied:** added `itemId: text("item_id").notNull()` to `connectedBanks` in
+`db/schema.ts`, plus `index("connected_banks_user_id_idx").on(table.userId)` (same indexing
+pattern as `accounts`/`categories`) and
+`uniqueIndex("connected_banks_item_id_unique_idx").on(table.itemId)` — added the unique index
+because `itemPublicTokenExchange` is only ever expected to run once per successful Link flow
+for a given Plaid Item, so storing the same Item twice (e.g. a double-submitted
+exchange-public-token request) would be a bug, not a legitimate state; this mirrors the
+BUG-005 duplicate-prevention precedent already in this file. `plaid.ts`'s
+`/exchange-public-token` now captures `exchange.data.item_id` and includes it in the insert.
+Migration: `drizzle/0008_eminent_juggernaut.sql`, generated via `npx drizzle-kit generate`,
+applied via `npx drizzle-kit migrate` — applied cleanly.
 
 ### BUG-014 🔴 `PLAID_ENV` documented but unused
 **Verified.** README.md lists `PLAID_ENV` as a required env var, but `plaid.ts:11-12`

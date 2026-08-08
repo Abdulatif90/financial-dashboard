@@ -1,0 +1,494 @@
+# Bugs & Technical Debt
+
+Living tracklist. Every entry is either verified against the current code (✅ Verified) or
+still needs verification (🔍 Unverified — do not act on it until checked). Status moves
+`Open -> In Progress -> Fixed` as work lands; fixed entries stay here (struck through) instead
+of being deleted, so the audit trail survives.
+
+Source: initial pass combined a mentor's prioritized review (Tier 1-3, cost/impact ordered)
+with a direct code audit on 2026-08-08. Entries the mentor's list raised that turned out
+**not** to apply to this codebase are recorded at the bottom under "Checked, not applicable" —
+keeping them visible is more honest than silently dropping them.
+
+Status legend: 🔴 Open · 🟡 In Progress · 🟢 Fixed
+
+---
+
+## Priority 1 — cheap, high impact
+
+### BUG-001 🟢 Fixed 2026-08-08 — IDOR on transaction create — accountId/categoryId ownership never checked
+**Verified.** `POST /api/transactions` and `POST /api/transactions/bulk-create`
+(`app/api/[[...route]]/transactions.ts:100-141`) insert whatever `accountId`/`categoryId`
+the client sends, with no check that they belong to `auth.userId`. Any authenticated user who
+knows or guesses another user's account ID can attach a transaction to it.
+**Fix:** verify `accountId` (and `categoryId`, if set) belongs to the caller before insert;
+404 if not.
+**Test:** `app/api/[[...route]]/transactions.ownership.test.ts` — "POST /transactions
+ownership" and "POST /transactions/bulk-create ownership" assert `404` for a foreign
+`accountId`, plus a passing-case test confirming an owned account still succeeds.
+
+### BUG-002 🟢 Fixed 2026-08-08 — Same IDOR gap on transaction edit
+**Verified.** `PATCH /api/transactions/:id` (`transactions.ts:179-223`) confirms the
+transaction *being edited* is owned via a CTE join, but never checks that a **new**
+`accountId` in the payload also belongs to the caller. A user can move their own transaction
+onto someone else's account.
+**Fix:** validate the new `accountId`'s ownership before applying the update.
+**Test:** `transactions.ownership.test.ts` — "PATCH /transactions/:id ownership" asserts
+`404` for a foreign `accountId`.
+
+### BUG-003 🟢 Fixed 2026-08-08 — Redundant per-route auth middleware
+**Verified.** `app/api/[[...route]]/app.ts:10-23` already applies `clerkMiddleware()` once
+and a 401 guard app-wide. Every single handler in `accounts.ts`, `categories.ts`,
+`transactions.ts`, `summary.ts`, and `plaid.ts` (broader than originally scoped — same
+pattern found in the last two once actually checked) called `clerkMiddleware()` again. Not a
+security hole (defense in depth is harmless), but it's dead weight and makes the real guard
+harder to find.
+**Fix applied:** removed the per-route `clerkMiddleware()` calls (and the now-unused import)
+from all five route files; `app.ts`'s app-level middleware is the only place it runs now.
+**Note (scope correction):** the per-handler `const auth = getAuth(c); if (!auth.userId) {...}`
+checks were **kept**, not dropped as originally planned — `getAuth()`'s return type has
+`userId: string | null`, so TypeScript can't know the app-level guard already ran; removing
+the check would either break `tsc --noEmit` (passing a possibly-null `userId` into
+`eq(accounts.userId, ...)` / a `.notNull()` insert column) or require scattering non-null
+assertions instead. The check now exists purely for type narrowing, not as a second security
+check — that's still worth keeping, just for a different reason than BUG-003 originally
+assumed.
+
+### BUG-004 🟢 Fixed 2026-08-08 — No indexes anywhere in the schema
+**Verified.** `db/schema.ts` had zero `.index()` / index definitions. Every list query
+filters by `accounts.userId`, `categories.userId`, or joins `transactions` to `accounts` and
+filters by date range — all full scans.
+**Fix applied:** added indexes on `accounts.userId`, `categories.userId`,
+`transactions(accountId, date)`, `transactions.categoryId` (`db/schema.ts`), generated via
+`npx drizzle-kit generate` (`drizzle/0006_true_leader.sql`), applied via
+`npx drizzle-kit migrate`.
+**Measured (honestly, not fabricated):** ran `EXPLAIN ANALYZE` on the GET /transactions query
+shape (join transactions→accounts→categories, filtered by a real `user_id`) against the live
+dev DB — 90 transactions, 17 accounts, 63 categories. Before: `Seq Scan` throughout, 0.187ms
+execution. After: **still `Seq Scan` throughout, 0.123ms** — the difference is noise, not the
+index. At this row count, Postgres's planner correctly prefers a sequential scan; an index
+scan only wins once a table is large enough that the index's overhead is worth it (typically
+four-to-five-figure row counts, not 90). Confirmed the indexes are real and usable anyway by
+re-running with `SET enable_seqscan = off`: the plan switches to
+`Index Scan using transactions_category_id_idx` / `accounts_pkey` / `categories_pkey` and
+still completes in 0.171ms. So: the indexes are correctly built and will matter once this
+table has real production volume, but there is no honest "420→270"-style number to report
+today — the dataset is too small for the index to change anything yet. Re-run this
+measurement once the table has thousands of rows.
+
+### BUG-019 🟢 Fixed 2026-08-08 — `npm run lint` currently fails project-wide (pre-existing, unrelated to BUG-001..018)
+**Verified**, found incidentally while confirming lint was clean after the BUG-003/BUG-004
+changes — `npx eslint .` reports 1 error (`@typescript-eslint/no-explicit-any` in
+`components/custom-tooltip.tsx:5`) and 6 warnings (an incompatible-library warning in
+`components/data-table.tsx`, four `formSchema` unused-as-value warnings in the
+account/category sheet components, one unused `queryClient` in
+`features/plaid/api/use-exchange-public-token.ts`) across files this session never touched.
+**Fix applied:**
+- `components/custom-tooltip.tsx`: replaced the `any` prop type with
+  `Partial<TooltipContentProps<number, string>>` (Recharts' real tooltip-content prop type,
+  imported as a type-only import). `Partial` because `<CustomTooltip />` is written with no
+  props in `line-variant.tsx`/`bar-variant.tsx`/`aria-variant.tsx` — Recharts clones the
+  element and injects `active`/`payload`/etc. at render time, so the props can't be required
+  at JSX-creation time. `payload[0]`/`payload[1]`'s `.value` is `number | undefined` in the
+  real type (it wasn't checked at all under `any`), so those reads are now wrapped in
+  `Number(... ?? 0)`.
+- `edit-account-sheet.tsx` / `new-account-sheet.tsx` / `edit-category-sheet.tsx` /
+  `new-category-sheet.tsx`: each had a local `const formSchema = insert*Schema.pick({ name:
+  true })` used only for `z.input<typeof formSchema>` — the actual runtime validation happens
+  inside `AccountForm`/`CategoryForm`, which own their own `formSchema` + `zodResolver`. Removed
+  the unused runtime binding; `FormValues` is now derived directly as
+  `Pick<z.input<typeof insertAccountSchema>, "name">` (or `insertCategorySchema` for the
+  category sheets) — same type, no dead value.
+**Left as-is (explicitly out of scope, see task notes):**
+- `components/data-table.tsx`'s React Compiler "incompatible library" warning about
+  `useReactTable()` — framework-level limitation (TanStack Table's API isn't
+  compiler-memoizable), not a code bug.
+- `features/plaid/api/use-exchange-public-token.ts`'s unused `queryClient` — ties directly to
+  BUG-009's unfinished `onSuccess` TODO (query invalidation after bank connect), which is
+  deferred, lower-priority Plaid work. Fixing the warning without implementing invalidation
+  would just mean deleting the variable and losing the TODO's context.
+**Verified:** `npx eslint .` now reports 0 errors, 2 warnings (exactly the two left-as-is
+above). `npx tsc --noEmit` clean. `npx vitest run` still 14/14.
+
+### BUG-020 🟢 Fixed 2026-08-08 — `npm run db:seed` is broken — `ts-node` isn't a dependency
+**Verified**, found incidentally while re-seeding for BUG-007. `package.json`'s
+`"db:seed": "ts-node scripts/seed.ts"` fails with `'ts-node' is not recognized` — the project
+uses `tsx` everywhere else (it's a devDependency; `ts-node` isn't). Worked around it for this
+session's re-seed by running `npx tsx scripts/seed.ts` directly.
+**Fix applied:** changed the script to `"db:seed": "tsx scripts/seed.ts"` in `package.json`.
+Not re-run here (out of scope — this is a code-only change; the script was already verified
+working via `npx tsx scripts/seed.ts` during the BUG-007 session).
+
+---
+
+## Priority 2
+
+### BUG-005 🟢 Fixed 2026-08-08 — Duplicate-name race on accounts/categories
+**Verified, and worse than expected: this has already happened in production**, not just a
+theoretical race. `accounts.ts` and `categories.ts` do an app-level `select`
+(case-insensitive, trimmed match) then `insert` — classic check-then-act. Two concurrent
+requests (e.g. a double-click) can both pass the check and insert duplicate names.
+
+Checked the live dev DB directly (2026-08-08) before attempting the fix: user
+`user_3ARwkpDyxNuobnknXHhlpffgH6u` already has **real duplicate rows** —
+`accounts`: "Savings Account" ×4, "Cash Wallet" ×4; `categories`: "Education" ×4, "Rent" ×4,
+"Gift" ×4, "Interest" ×4, "Transfer" ×4 (all same normalized name, same user).
+
+**This blocks the straightforward fix.** A `CREATE UNIQUE INDEX` migration will fail outright
+against data that already violates it. Fixing this requires deciding how to handle the
+existing duplicates before the constraint can be added:
+1. Pick a canonical row per `(user_id, lower(trim(name)))` group (e.g. oldest `id`),
+   re-point every `transactions` row referencing a duplicate's `id` to the canonical row's
+   `id`, then delete the duplicate rows — then add the unique index.
+2. Or: rename the duplicates (e.g. append a suffix) instead of merging, preserving all rows
+   and their transaction history as-is, then add the unique index.
+
+**User chose: merge.** Ran a script that grouped duplicates by `(user_id, lower(trim(name)))`,
+picked the row with the most attached transactions as canonical per group (ties broken by
+`id`), re-pointed every `transactions.account_id`/`category_id` referencing a duplicate onto
+the canonical row inside a `sql.transaction([...])` batch per row (atomic update+delete),
+then deleted the duplicates. Verified zero duplicates remain afterward. Merged: 2 account
+groups ("Savings Account", "Cash Wallet"), 5 category groups ("Transfer", "Rent", "Interest",
+"Education", "Gift") — all for one user, all real data, all pre-existing before this session.
+
+**Fix applied:** added a DB-level `UNIQUE (user_id, lower(trim(name)))` constraint via
+`uniqueIndex` in `db/schema.ts` for both tables (`drizzle/0007_wild_supreme_intelligence.sql`,
+applied to the live DB). `accounts.ts`/`categories.ts`'s `POST /` now wraps the insert in a
+try/catch: on a genuine race (Postgres error code `23505`), it re-queries and returns the
+existing row instead of 500ing — same idempotent-create UX as the pre-check path, just backed
+by a real constraint instead of a racy select-then-insert.
+**Verified:** a throwaway script confirmed the index rejects a case/whitespace-insensitive
+duplicate (`"Duplicate Test"` vs `"  duplicate test  "`) with exactly error code `23505`.
+
+### BUG-006 🟢 Fixed 2026-08-08 — Date-range filter drops same-day transactions after midnight
+**Verified.** `GET /api/transactions` (`transactions.ts`) parsed `to` with
+`parse(to, "yyyy-MM-dd", new Date())`, which lands on `00:00:00`, then filtered with
+`lte(transactions.date, endDate)`. Any transaction on the `to` date after midnight was
+excluded from the range. The identical pattern also existed in `summary.ts`'s `to` handling.
+**Fix applied:** both now wrap the parsed `to` date in date-fns' `endOfDay()` before
+comparing.
+**Not fixed (separate, smaller issue):** seed data (`scripts/seed.ts`) uses whole-day
+timestamps with no time component, so this bug was invisible against seeded data. Left as-is
+for now — randomizing seed times is cosmetic/test-quality, not a correctness bug, and safe to
+defer.
+**Test:** `transactions.ownership.test.ts` — "GET /transactions date-range boundary (BUG-006,
+fixed)" spies on the real `lte` from drizzle-orm and asserts the `to` date it receives is
+`23:59:59`, not midnight.
+
+### BUG-007 🟢 Fixed 2026-08-08 — Amounts stored as whole-dollar integer but UI accepts cents
+**Verified.** `db/schema.ts` used `amount: integer("amount")`, which is fine for cents, but
+nothing enforced that the value stored there actually *was* cents.
+`components/amount-input.tsx` uses `react-currency-input-field` with `decimalScale={2}` /
+`decimalsLimit={2}`, i.e. the UI happily accepts `$12.34`. `insertTransactionSchema` only
+required `z.number().finite()`, no integer constraint. A decimal amount sent to an `integer`
+column would error or be coerced — not stored as entered.
+
+**Bigger finding while investigating:** the CSV import path
+(`app/(dashboard)/transactions/page.tsx`'s `parseCsvAmount`) already did
+`Math.round(parsedAmount * 100)` — i.e. it was **already** storing cents — while the manual
+`TransactionForm` path stored raw dollars. Two creation paths, two different units, silently.
+Checked the live dev DB's ~90 transactions before touching anything: found exact ×100
+duplicate pairs (e.g. Yandex Go at both `-5` and `-500`; Apteka 999 at both `-13` and
+`-1300`), confirming this wasn't theoretical — the data was already corrupted by the unit
+mismatch. Asked the user whether this was real financial data or disposable test data; they
+confirmed it was CSV test data written for testing, safe to clear rather than needing
+per-row unit forensics. Cleared `transactions` (accounts/categories, already deduplicated
+under BUG-005, were kept) and re-seeded with `scripts/seed.ts` (now cents-aware).
+
+**Fix applied** (no expand-contract needed — the column type doesn't change, only the
+semantic meaning, and there was no real data to preserve once confirmed disposable):
+- `lib/utils.ts`: added `convertAmountToCents`/`convertAmountFromCents` as the single source
+  of truth for the ×100 factor; `formatCurrency` now takes cents and divides internally.
+- `db/schema.ts`: `insertTransactionSchema.amount` is now `z.number().int(...)` — rejects any
+  non-integer amount reaching the API, closing the gap the original bug report described.
+- `features/transactions/components/new-transaction-sheet.tsx` /
+  `edit-transaction-sheet.tsx`: convert dollars → cents on submit, cents → dollars when
+  populating the edit form's `defaultValues`.
+- `app/(dashboard)/transactions/columns.tsx`: dropped its own separate `amountFormatter` in
+  favor of the shared `formatCurrency` (was already displaying raw un-formatted cents as if
+  they were dollars — a second, related display bug, fixed as part of the same change).
+  Same fix applied to the CSV import preview table in `page.tsx`.
+- `scripts/seed.ts`: `generateRandomAmount` now multiplies every branch by 100.
+- `parseCsvAmount` needed **no change** — it was already doing the right thing; this fix
+  brought the manual-entry path in line with it, not the other way around.
+**Test:** `db/schema.amount.test.ts` — flipped from documenting the bug to asserting the fix
+(`amount: 12.34` now rejected), plus new tests for the convert helpers and `formatCurrency`'s
+output (`formatCurrency(1234)` → `"$12.34"`).
+**Verified against the live DB:** re-ran the seed script; confirmed all 57 resulting
+transaction rows have `amount % 100 = 0` (whole cents).
+
+### BUG-008 🟢 Fixed 2026-08-08 — `NEXT_PUBLIC_API_URL` missing env var crashes the whole app
+**Verified.** `lib/hono.ts` threw at **module import time** if the env var was unset. Since
+this module is imported by every feature's API hook, one missing env var blank-screened the
+entire app instead of failing one request.
+**Fix applied:** `client` is now a `Proxy` that lazily constructs the real `hc<AppType>()`
+client (and does the env-var check) on first actual property access, not at import time.
+Methods returned through the proxy are `.bind()`ed to the real client so `this` stays
+correct. Verified with a throwaway script: importing `@/lib/hono` with
+`NEXT_PUBLIC_API_URL` unset now succeeds; only actually using `client` throws, and the error
+is still the same catchable message. All 22 consumer files (`features/**/api/use-*.ts`)
+needed no changes — same `client.api.xxx` shape.
+
+### BUG-018 🟢 Fixed 2026-08-08 — `db/drizzle.ts` also crashed at import time without `DATABASE_URL`
+**Verified.** `db/drizzle.ts` called `neon(process.env.DATABASE_URL!)` at module load, not
+inside a request handler. Same failure mode as BUG-008, different module.
+**Fix applied:** same `Proxy` + lazy-construction + `.bind()` pattern as BUG-008, applied to
+both `sql` (the Neon tagged-template client — its proxy target is a function so it stays
+callable as `` sql`...` ``) and `db` (the drizzle instance). Verified two ways: (1) a
+throwaway script confirmed import succeeds with `DATABASE_URL` unset and only usage throws;
+(2) a smoke test against the **live dev DB** confirmed `db.select().from().where()` and
+`` sql`select 1` `` both still work correctly through the proxy (this mattered because a
+naive proxy `get` trap without `.bind()` would silently break `this`-dependent methods on the
+real drizzle/neon client objects).
+
+---
+
+## Plaid integration — incomplete (found during initial resume, 2026-08-08)
+
+### BUG-009 🟢 Fixed 2026-08-08 — No query invalidation / state update after bank connect
+**Verified.** `features/plaid/api/use-exchange-public-token.ts:25-28` — `onSuccess` had a
+bare `// TODO`, nothing was invalidated or refetched after a successful connect.
+**Fix applied:** `onSuccess` now invalidates the `["plaid-status"]` query key (the one
+`use-get-plaid-status.ts`, added for BUG-010, uses), so the Settings UI flips to "Bank account
+connected" immediately after a successful Plaid Link flow, no manual refresh needed. This also
+naturally resolved BUG-019's leftover `queryClient`-unused-variable eslint warning, since the
+variable is now actually used.
+
+### BUG-010 🟢 Fixed 2026-08-08 — `connectBank` hardcoded to `null` in Settings UI
+**Verified.** `app/(dashboard)/settings/settings-card.tsx:15` — `const connectBank = null;`.
+There was no GET endpoint to check real connection status, so the UI could never show "Bank
+account connected" even when one existed.
+**Fix applied:** added `GET /api/plaid/status` (`plaid.ts`) — ownership-scoped
+(`eq(connectedBanks.userId, auth.userId)`, `limit(1)`), returns `{ data: { connected: boolean
+} }` from our own `connected_banks` table (no live Plaid call needed, since that table is
+already the source of truth for whether *we* consider the user connected). Added
+`features/plaid/api/use-get-plaid-status.ts` (`useQuery`, key `["plaid-status"]`, same pattern
+as `use-get-accounts.ts`). `settings-card.tsx` now derives `connectBank` from this query
+instead of the hardcoded `null`.
+**Test:** `app/api/[[...route]]/plaid.ownership.test.ts` — "GET /plaid/status ownership"
+asserts the route calls `eq(connectedBanks.userId, "user_me")` and returns
+`connected: false`/`true` correctly depending on row presence.
+
+### BUG-011 🟢 Fixed 2026-08-08 — No transaction sync/import endpoint
+**Verified.** `app/api/[[...route]]/plaid.ts` only had `create-link-token` and
+`exchange-public-token`. README.md claims "Import transactions automatically" / "Sync
+financial data" — no `transactionsSync` call or endpoint backed that claim anywhere in the repo.
+Deliberately out of scope for the BUG-009/010/012/013 dispatch (it needed design decisions
+that dispatch's prompt didn't resolve); a first attempt at it then died on a session usage
+limit, landing two pieces before it stopped:
+- `lib/plaid-mapping.ts` (commit `1790bae`) — pure Plaid→local mapping helpers.
+- `connectedBanks.cursor` (`text("cursor")`, nullable — NULL = never synced), commit
+  `3575513`, migration `drizzle/0009_mysterious_namorita.sql`, already applied to the live DB.
+
+**Fix applied** (built *on top of* those two, neither was recreated):
+- **`POST /api/plaid/sync`** (`plaid.ts`) — ownership-scoped select of the caller's
+  `connected_banks` rows (`eq(connectedBanks.userId, auth.userId)`), 404 if none. For each
+  row it loops `client.transactionsSync({ access_token, cursor })` until `has_more` is false
+  (Plaid paginates; stopping after one page silently drops transactions), bounded at 100 pages
+  so a misbehaving response can't spin the request forever.
+- **Account find-or-create**: first real use of the previously-unused `accounts.plaid_id`
+  column. Looks up `and(eq(accounts.userId, auth.userId), eq(accounts.plaidId, account_id))`;
+  inserts `{ plaidId, name: plaidAccountName(...), userId }` when missing. Every Plaid account
+  referenced by a page (`accounts[]`, plus any account referenced only by a transaction) is
+  resolved *before* that page's transactions, since `transactions.account_id` is `NOT NULL`.
+- **Category find-or-create**: same shape, keyed on
+  `plaidCategoryKey(transaction)` (`personal_finance_category.primary`) with
+  `name = titleCasePlaidCategory(key)`. A `null` key (Plaid didn't classify it) means
+  `categoryId: null` — no invented category.
+- Both find-or-creates catch Postgres `23505` from BUG-005's
+  `UNIQUE (user_id, lower(trim(name)))` index — a user who already has a manually-created
+  "Groceries" adopts that row (and gets its `plaid_id` backfilled if it was null) instead of a
+  500.
+- **Upsert**: `db.insert(transactions).values(mapPlaidTransaction(...)).onConflictDoUpdate({
+  target: transactions.id, set: {...} })`. Plaid's `transaction_id` is reused as our primary
+  key, which is what makes re-syncing (and Plaid's `modified` list) idempotent. `notes` is
+  deliberately **excluded** from the update `set` — it's user-entered and Plaid has nothing to
+  put there.
+- **Deletes**: for each `removed` entry, `delete ... where and(eq(transactions.id, ...),
+  inArray(transactions.accountId, <the caller's account ids>))`. `transactions` has no
+  `user_id` of its own, so the account-id restriction is what stops a `transaction_id` from
+  another user's Item deleting our rows.
+- **Cursor persisted page-by-page**, not once at the end, so a failure on page 4 of 7 doesn't
+  discard pages 1-3.
+- **Plaid errors don't 500**: `transactionsSync` is wrapped in try/catch; a revoked/invalid
+  `access_token` returns `502 { error: "Failed to sync transactions with Plaid" }`.
+- Returns `{ data: { added, modified, removed, accountsCreated, categoriesCreated } }`.
+- **Frontend**: `features/plaid/api/use-sync-transactions.ts` (mutation hook, same structure as
+  `use-disconnect-bank.ts`) invalidates `["transactions"]`, `["summary"]`, `["accounts"]` and
+  `["categories"]` on success — a sync can create accounts/categories, not just transactions.
+  `settings-card.tsx` shows a "Sync transactions" button next to "Disconnect" when connected.
+**Test:** `lib/plaid-mapping.test.ts` (13 new tests) pins the mapping, above all the amount
+sign convention in **both** directions — a Plaid purchase `12.34` → `-1234` cents, a Plaid
+refund `-12.34` → `+1234` cents — plus the float-rounding case (`8.7` → `-870`, not
+`-869.9999999999999`, which `insertTransactionSchema`'s integer check would reject).
+`plaid.ownership.test.ts` gains 6 `/sync` tests on the existing mocked-db + spied-`eq` +
+mocked-`PlaidApi` pattern (`transactionsSync` mocked alongside `itemRemove` — no test calls
+Plaid's real API): 404-without-calling-Plaid when nothing is connected; ownership-scoped
+find-or-create asserting `eq(accounts.userId, "user_me")` / `eq(categories.userId, "user_me")`
+and that the inserted rows carry the caller's `userId`, with the sign flip asserted
+end-to-end through the route (`-1234` reaches `.values()`); the refund direction; cursor
+replay + per-page persistence across two pages; delete restricted via
+`inArray(transactions.accountId, ["local_acc_1"])`; and the 502-not-500 Plaid-failure path.
+The mocked `db` proxy now records its method calls, so tests can assert *what* was written,
+not just that a write happened.
+**Verified:** `npx tsc --noEmit` clean, `npx vitest run` → 37/37 (18 pre-existing + 19 new),
+`npx eslint .` → 0 errors / 1 warning (the pre-existing `data-table.tsx` one). No live Plaid
+call and no live DB write was made as part of this work — everything is proven through mocks,
+per the dispatch's constraints.
+
+### BUG-012 🟢 Fixed 2026-08-08 — No disconnect/unlink-bank flow
+**Verified.** No delete/unlink endpoint or UI action existed for `connectedBanks` rows.
+**Fix applied:** added `POST /api/plaid/disconnect` (`plaid.ts`) — ownership-scoped select
+(`eq(connectedBanks.userId, auth.userId)`), 404 if the caller has no connected bank, otherwise
+calls `client.itemRemove({ access_token })` for each row found (Plaid's real API is not
+called in tests — see `plaid.ownership.test.ts`) and, only after a successful `itemRemove`,
+deletes that row from `connected_banks`. Added
+`features/plaid/api/use-disconnect-bank.ts` (mutation hook, same structure as
+`use-exchange-public-token.ts`), invalidates `["plaid-status"]` on success. `settings-card.tsx`
+now shows a "Disconnect" button in place of the "Connect" button when a bank is connected
+(derived from the BUG-010 status query).
+**Test:** `plaid.ownership.test.ts` — "POST /plaid/disconnect ownership" asserts 404 with no
+connected bank (and that `itemRemove` is never called in that case), and asserts `itemRemove`
+is called with the right `access_token` plus `eq(connectedBanks.userId, "user_me")` when a
+bank is connected.
+
+### BUG-013 🟢 Fixed 2026-08-08 — `connectedBanks` table missing `itemId`
+**Verified.** `db/schema.ts:87-91` — only `id`, `userId`, `accessToken`. Plaid webhooks and
+item management (including sync cursors, disconnect) key off `item_id`, which wasn't stored.
+**Verified the table was empty (0 rows) before migrating** — checked directly against the live
+DB both before generating the migration and again immediately before applying it, so no
+backfill/data-loss concern for the new `NOT NULL` column.
+**Fix applied:** added `itemId: text("item_id").notNull()` to `connectedBanks` in
+`db/schema.ts`, plus `index("connected_banks_user_id_idx").on(table.userId)` (same indexing
+pattern as `accounts`/`categories`) and
+`uniqueIndex("connected_banks_item_id_unique_idx").on(table.itemId)` — added the unique index
+because `itemPublicTokenExchange` is only ever expected to run once per successful Link flow
+for a given Plaid Item, so storing the same Item twice (e.g. a double-submitted
+exchange-public-token request) would be a bug, not a legitimate state; this mirrors the
+BUG-005 duplicate-prevention precedent already in this file. `plaid.ts`'s
+`/exchange-public-token` now captures `exchange.data.item_id` and includes it in the insert.
+Migration: `drizzle/0008_eminent_juggernaut.sql`, generated via `npx drizzle-kit generate`,
+applied via `npx drizzle-kit migrate` — applied cleanly.
+
+### BUG-014 🟢 Fixed 2026-08-08 — `PLAID_ENV` documented but unused
+**Verified.** README.md lists `PLAID_ENV` as a required env var, but `plaid.ts` hardcoded
+`basePath: PlaidEnvironments.sandbox`. The env var had no effect.
+**Fix applied:** `plaidEnv = process.env.PLAID_ENV === "production" ? "production" : "sandbox"`,
+used as `PlaidEnvironments[plaidEnv]`. Checked the installed `plaid` SDK directly
+(`node_modules/plaid/dist/configuration.js`) rather than assuming — this version's
+`PlaidEnvironments` only exposes `sandbox` and `production` (no `development`), so those are
+the only two valid values; anything else (including unset) falls back to `sandbox`.
+**Verified:** `tsc --noEmit` clean, `vitest run` 18/18, `eslint` on the file clean. Fixed
+directly (not via subagent dispatch) — small, single-file, no live-DB/Plaid-network risk, and
+the concurrent BUG-011 dispatch that would normally own this file was blocked on a session
+usage limit at the time.
+
+---
+
+## Repo / environment status (not code bugs, but blocking)
+
+### BUG-015 🟢 Fixed 2026-08-08 — Zero git commits
+Working tree was fully untracked at the start of the session. Fixed: the first commit landed
+the same day, and the branch this work lives on has 20+ commits since.
+
+### BUG-016 🟢 No `.env` file
+Fixed 2026-08-08 — `.env` created with the required keys (`DATABASE_URL`,
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET`,
+`PLAID_ENV`, `NEXT_PUBLIC_API_URL`), values left blank for the user to fill in.
+
+### BUG-017 🟢 Fixed 2026-08-08 — Zero automated tests
+No test framework was installed, no test files existed. Fixed: vitest installed, and the
+suite grew to 38 tests across 4 files over the session (ownership regression, amount/cents
+validation, Plaid mapping and sign-convention tests).
+
+### BUG-021 🟢 Fixed 2026-08-08 — `@hono/clerk-auth` needs `CLERK_PUBLISHABLE_KEY`, a separate env var from the Next.js one
+**Verified by actually running `npm run dev` for the first time this session** (previously
+only `tsc`/`vitest`/`eslint` had been checked — none of those exercise the Clerk middleware at
+runtime). Every API route 500'd with `Error: Missing Clerk Publishable key`, even though
+`.env` had `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` set correctly.
+**Root cause:** `node_modules/@hono/clerk-auth/dist/index.js` reads `CLERK_PUBLISHABLE_KEY`
+(no `NEXT_PUBLIC_` prefix) directly — a different variable from the one `@clerk/nextjs`'s
+frontend `ClerkProvider` reads (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`). Both are required, same
+value, two different consumers, and this was never documented anywhere (not in README, not in
+the original BUG-016 `.env` template). `.env` also had a typo'd, dead `CLERK_PUBLICABLE_KEY`
+(missing an "H") that nothing ever read — likely someone's earlier attempt to add exactly this
+variable, misspelled.
+**Fix applied:** added `CLERK_PUBLISHABLE_KEY` to `.env` (same value as
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), removed the dead typo'd variable, documented why both
+exist directly in `.env`'s comments.
+**Verified:** restarted `npm run dev`, `GET /api/accounts` went from `500` (`Missing Clerk
+Publishable key`) to `401 Unauthorized` (the correct response for an unauthenticated
+request) — confirmed via the actual server log, not assumed. `/` and `/sign-in` both render
+`200`.
+**Lesson:** `tsc`/`vitest`/`eslint` all passed the whole session while this was broken —
+none of them boot the actual Next.js server or exercise `@hono/clerk-auth`'s middleware.
+`npm run dev` should be checked at least once per session that touches auth-adjacent config,
+not assumed fine because the automated checks are green. This is a runtime/auth-configuration
+bug, not a test-coverage gap -- filed here rather than under Priority 3 below.
+
+---
+
+## Priority 3 — test coverage gaps
+
+Tracked as work, not bugs: see docs/PLAN.md "Tier 3 — tests" for the specific test list
+(ownership tests for every write path, plus the two integrity tests for BUG-006/BUG-007).
+Any *new* bug a test uncovers gets appended here with the next BUG-0xx number, in the section
+that matches its priority.
+
+---
+
+## Deliberately left open (documented trade-offs, not gaps)
+
+- **`drizzle-orm/neon-http` does not support multi-statement transactions**
+  (`db/drizzle.ts:2`). Acceptable today because every write touches a single table; the day a
+  delete needs to cascade across tables, this driver has to change.
+- **No caching layer.** No measured need for one yet.
+- **Migrations 0007 (`UNIQUE` on accounts/categories names, BUG-005) and 0008 (`item_id
+  NOT NULL` on `connected_banks`, BUG-013) assume the tables they alter are safe for that
+  constraint** — they were verified against *this* deployment's actual data before being
+  generated and applied (real duplicate names were found and merged before 0007; `connected_
+  banks` was confirmed empty before 0008), not backfilled generically. A migration is
+  immutable once applied, so those two files are not rewritten after the fact to handle
+  arbitrary other databases' existing data — if this schema is ever applied to a *different*
+  populated database, re-verify (or write a new backfill migration) before running them,
+  don't assume they're safe by default.
+
+---
+
+## Checked, not applicable to this repo
+
+- **"404 not 403 on ownership failures"** — already the case throughout `accounts.ts` and
+  `categories.ts` (e.g. `accounts.ts:165`, `categories.ts:165`). No action needed.
+
+## Correction to an earlier "not applicable" note
+
+- **"Stop returning `access_token` to the browser"** was originally marked "not applicable"
+  here, because the disconnected local scaffold this session started from (root commit
+  `5256ef0`, before the later reconciliation onto the real `origin/master`) already returned
+  only `{ data: { connected: true } }`. That was true for the local file at the time, but
+  **the real `origin/master`'s `/exchange-public-token` did leak the raw Plaid `access_token`
+  to the client** (`return c.json({ data: exchange.data.access_token }, 200)`). This surfaced
+  as a merge conflict while reconciling this branch onto the real base, and was fixed then
+  (`app/api/[[...route]]/plaid.ts`). Recorded here rather than silently editing the original
+  note, since the original claim actually was correct for what it was checking at the time —
+  the base just changed under it.
+
+---
+
+### BUG-022 🔴 Plaid-imported transaction dates may land on the wrong calendar day for non-UTC deployments
+**Verified** via CodeRabbit's automated PR review, cross-checked against `date-fns`/JS `Date`
+parsing semantics. `lib/plaid-mapping.ts`'s `mapPlaidTransaction` does
+`new Date(transaction.date)` on Plaid's `YYYY-MM-DD` date-only string — per the ECMAScript
+spec, a date-only ISO string parses as **UTC midnight**, not local midnight. `transactions.date`
+is a Postgres `timestamp` (no time zone). If the app or database session isn't in UTC, the
+calendar day read back out can be one day off from what Plaid reported.
+**Not fixed in this pass.** Two reasons: (1) the CSV import path
+(`app/(dashboard)/transactions/page.tsx`'s `parseCsvDate`) has the exact same
+`new Date(value)` pattern already, so fixing only the Plaid path would leave an inconsistency
+between the two import mechanisms rather than closing the gap; (2) a proper fix needs a
+decision that affects both paths together (e.g. always normalize date-only strings to a fixed
+local-noon instant, or store dates as `date`-only in Postgres instead of `timestamp`), not a
+one-line patch to `plaid-mapping.ts` alone.
+**Fix (when picked up):** decide the normalization strategy once, apply it to both
+`mapPlaidTransaction` and `parseCsvDate`, add a timezone-sensitive regression test (assert the
+calendar day survives a round-trip under a non-UTC `TZ`).

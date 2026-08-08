@@ -8,17 +8,13 @@ import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { client } from "@/lib/hono";
+import { formatCurrency } from "@/lib/utils";
 
 import { Actions } from "./actions";
 import { AccountColumn } from "./account-column";
 import { CategoryColumn } from "./category-column";
 
 export type ResponseType = InferResponseType<typeof client.api.transactions.$get, 200>["data"][0];
-
-const amountFormatter = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-});
 
 const renderSortableHeader = (
     label: string,
@@ -103,7 +99,7 @@ export const columns: ColumnDef<ResponseType>[] = [
 
             return (
                 <div className={amount < 0 ? "text-red-600" : "text-emerald-600"}>
-                    {amountFormatter.format(amount)}
+                    {formatCurrency(amount)}
                 </div>
             );
         },

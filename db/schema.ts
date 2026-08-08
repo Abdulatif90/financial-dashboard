@@ -1,11 +1,13 @@
 import { createInsertSchema } from "drizzle-zod";
 import {
-    integer, 
-    pgTable, 
+    index,
+    integer,
+    pgTable,
     text,
-    timestamp } from "drizzle-orm/pg-core";
+    timestamp,
+    uniqueIndex } from "drizzle-orm/pg-core";
 
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { z } from "zod";
 
 const nullableText = z.preprocess(
@@ -25,7 +27,11 @@ export const accounts = pgTable("accounts", {
     plaidId: text("plaid_id"),
     name: text("name").notNull(),
     userId: text("user_id").notNull(),
-});
+}, (table) => [
+    index("accounts_user_id_idx").on(table.userId),
+    // BUG-005: the app-level check-then-insert had a race; the DB is the source of truth now.
+    uniqueIndex("accounts_user_id_name_unique_idx").on(table.userId, sql`lower(trim(${table.name}))`),
+]);
 
 export const accountsRelations = relations(accounts, ({ many }) => ({
     transactions: many(transactions),
@@ -39,7 +45,11 @@ export const categories = pgTable("categories", {
     plaidId: text("plaid_id"),
     name: text("name").notNull(),
     userId: text("user_id").notNull(),
-});
+}, (table) => [
+    index("categories_user_id_idx").on(table.userId),
+    // BUG-005: the app-level check-then-insert had a race; the DB is the source of truth now.
+    uniqueIndex("categories_user_id_name_unique_idx").on(table.userId, sql`lower(trim(${table.name}))`),
+]);
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
     transactions: many(transactions),
@@ -60,7 +70,10 @@ export const transactions = pgTable("transactions", {
     categoryId: text("category_id").references(() => categories.id, {
         onDelete: "set null",
     }),
-})
+}, (table) => [
+    index("transactions_account_id_date_idx").on(table.accountId, table.date),
+    index("transactions_category_id_idx").on(table.categoryId),
+])
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
     account: one(accounts, {
@@ -80,7 +93,11 @@ export const insertTransactionSchema = createInsertSchema(transactions, {
     accountId: z.string().trim().min(1, "Account is required"),
     categoryId: nullableText,
     payee: z.string().trim().min(1, "Payee is required"),
-    amount: z.number().finite(),
+    // BUG-007: amount is cents, so it must always be a whole number by the time it reaches
+    // this schema (the client converts dollars -> cents before sending). z.int32 (not plain
+    // z.number().int()) also bounds it to Postgres's `integer` range -- z.number().int()
+    // alone would let e.g. 3_000_000_000 pass validation only to fail at insert.
+    amount: z.int32("Amount must be a whole number of cents within the 32-bit integer range"),
     notes: nullableText,
 });
 
@@ -88,4 +105,20 @@ export const connectedBanks = pgTable("connected_banks", {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     accessToken: text("access_token").notNull(),
-});
+    // BUG-013: Plaid webhooks and item management (including future sync cursors, disconnect
+    // via itemRemove) key off item_id, which wasn't stored before this.
+    itemId: text("item_id").notNull(),
+    // BUG-011: Plaid's /transactions/sync is cursor-based -- each response returns a
+    // `next_cursor` that must be persisted and replayed on the next sync so we only ever pull
+    // the delta. Nullable: NULL means "never synced", which is exactly what Plaid wants
+    // (omitting `cursor` entirely returns the full history from the beginning).
+    cursor: text("cursor"),
+}, (table) => [
+    index("connected_banks_user_id_idx").on(table.userId),
+    // One row per Plaid Item: itemPublicTokenExchange is only ever called once per successful
+    // Link flow for a given Item, and re-exchanging would produce a new access_token for the
+    // same underlying Item. A unique index on item_id prevents the same Item being stored
+    // twice (e.g. a double-submitted exchange-public-token request), mirroring the BUG-005
+    // duplicate-prevention pattern already used for accounts/categories names.
+    uniqueIndex("connected_banks_item_id_unique_idx").on(table.itemId),
+]);

@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { Hono } from "hono";
-import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
+import { getAuth } from "@hono/clerk-auth";
 import { zValidator } from "@hono/zod-validator";
 import { db } from "@/db/drizzle";
 import { sql, eq, and, gte, lte, lt, desc } from "drizzle-orm";
 import { transactions, accounts, categories} from "@/db/schema";
-import { differenceInDays, subDays, parse } from "date-fns";
+import { differenceInDays, endOfDay, subDays, parse } from "date-fns";
 import { calculatePercentageChange } from "@/lib/utils";
 import { fillMissingDays } from "@/lib/utils";
 
@@ -14,7 +14,6 @@ import { fillMissingDays } from "@/lib/utils";
 
 const app = new Hono()
 .get("/",
-  clerkMiddleware(),
   zValidator(   
     "query",
     z.object({
@@ -36,8 +35,10 @@ const app = new Hono()
     let startDate = from
         ? parse(from, "yyyy-MM-dd", new Date())
         : defaultFrom;
+    // endOfDay: an explicit `to` is a calendar date with no time component; without this,
+    // transactions on that date after midnight are excluded (same bug as BUG-006).
     let endDate = to
-        ? parse(to, "yyyy-MM-dd", new Date())
+        ? endOfDay(parse(to, "yyyy-MM-dd", new Date()))
         : defaultTo;
 
         if (startDate > endDate) {

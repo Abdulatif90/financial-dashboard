@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator }  from "@hono/zod-validator";
-import { clerkMiddleware, getAuth } from "@hono/clerk-auth";
+import { getAuth } from "@hono/clerk-auth";
 import { db } from "@/db/drizzle";
 import { eq, and, inArray, gte, lte, desc, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { transactions, insertTransactionSchema, categories, accounts } from "@/db/schema";
-import { parse } from "date-fns";
+import { endOfDay, parse } from "date-fns";
 
 
  
@@ -19,7 +19,6 @@ const app = new Hono()
         to: z.string().optional(),
         accountId: z.string().optional(),
       })),
-      clerkMiddleware(),
         async (c) => {{
           const auth = getAuth(c);
           const { from, to, accountId } = c.req.valid("query");
@@ -30,7 +29,10 @@ const app = new Hono()
           }
 
           const startDate = from ? parse(from, "yyyy-MM-dd", new Date()) : undefined;
-          const endDate = to ? parse(to, "yyyy-MM-dd", new Date()) : undefined;
+          // endOfDay: `to` is a calendar date with no time component, and `lte` compares
+          // against it -- without this, transactions on the `to` date after midnight would
+          // be excluded (BUG-006).
+          const endDate = to ? endOfDay(parse(to, "yyyy-MM-dd", new Date())) : undefined;
 
           const data = await db
             .select({
@@ -62,7 +64,6 @@ const app = new Hono()
     )
     .get("/:id",
       zValidator("param", z.object({ id: z.string().optional() })),
-      clerkMiddleware(),
         async (c) => {{ 
           const auth = getAuth(c);
           const { id } = c.req.valid("param");
@@ -98,7 +99,6 @@ const app = new Hono()
         }}
     )
     .post("/",
-      clerkMiddleware(),
       zValidator("json", insertTransactionSchema.omit({
           id: true,
 })),
@@ -108,6 +108,39 @@ const app = new Hono()
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const [account] = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                eq(accounts.id, values.accountId)
+              )
+            )
+            .limit(1);
+
+          if (!account) {
+            return c.json({ message: "Account not found" }, 404);
+          }
+
+          if (values.categoryId) {
+            const [category] = await db
+              .select({ id: categories.id })
+              .from(categories)
+              .where(
+                and(
+                  eq(categories.userId, auth.userId),
+                  eq(categories.id, values.categoryId)
+                )
+              )
+              .limit(1);
+
+            if (!category) {
+              return c.json({ message: "Category not found" }, 404);
+            }
+          }
+
           const [data] = await db.insert(transactions).values({
             id: createId(),
             ...values,
@@ -118,7 +151,6 @@ const app = new Hono()
         }
     )
     .post("/bulk-create",
-      clerkMiddleware(),
       zValidator("json", z.array(insertTransactionSchema.omit({
           id: true,
       }))),
@@ -128,6 +160,47 @@ const app = new Hono()
           if (!auth?.userId) {
             return c.json({ message: "Unauthorized" }, 401);
           }
+
+          const accountIds = Array.from(new Set(values.map((value) => value.accountId)));
+
+          const ownedAccounts = await db
+            .select({ id: accounts.id })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.userId, auth.userId),
+                inArray(accounts.id, accountIds)
+              )
+            );
+
+          if (ownedAccounts.length !== accountIds.length) {
+            return c.json({ message: "One or more accounts not found" }, 404);
+          }
+
+          const categoryIds = Array.from(
+            new Set(
+              values
+                .map((value) => value.categoryId)
+                .filter((categoryId): categoryId is string => Boolean(categoryId))
+            )
+          );
+
+          if (categoryIds.length > 0) {
+            const ownedCategories = await db
+              .select({ id: categories.id })
+              .from(categories)
+              .where(
+                and(
+                  eq(categories.userId, auth.userId),
+                  inArray(categories.id, categoryIds)
+                )
+              );
+
+            if (ownedCategories.length !== categoryIds.length) {
+              return c.json({ message: "One or more categories not found" }, 404);
+            }
+          }
+
           const data = await db.insert(transactions).values(
             values.map((value) => ({
               id: createId(),
@@ -141,7 +214,6 @@ const app = new Hono()
     )
     .post(
       "/bulk-delete",
-      clerkMiddleware(),
       zValidator(
         "json", 
         z.object({
@@ -178,7 +250,6 @@ const app = new Hono()
     )
     .patch(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
       zValidator("json", insertTransactionSchema.omit({
         id: true,
@@ -193,6 +264,38 @@ const app = new Hono()
         }
         if (!auth.userId) {
           return c.json({ error: "Unauthorized" }, 401);
+        }
+
+        const [account] = await db
+          .select({ id: accounts.id })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.userId, auth.userId),
+              eq(accounts.id, values.accountId)
+            )
+          )
+          .limit(1);
+
+        if (!account) {
+          return c.json({ error: "Account not found" }, 404);
+        }
+
+        if (values.categoryId) {
+          const [category] = await db
+            .select({ id: categories.id })
+            .from(categories)
+            .where(
+              and(
+                eq(categories.userId, auth.userId),
+                eq(categories.id, values.categoryId)
+              )
+            )
+            .limit(1);
+
+          if (!category) {
+            return c.json({ error: "Category not found" }, 404);
+          }
         }
 
         const transactionsToUpdate = db.$with("transactions_to_delete").as(db.select({ id: transactions.id }).from(transactions)
@@ -223,7 +326,6 @@ const app = new Hono()
     )
     .delete(
       "/:id",
-      clerkMiddleware(),
       zValidator("param", z.object({ id: z.string().optional() })),
       async (c) => {
         const auth = getAuth(c);

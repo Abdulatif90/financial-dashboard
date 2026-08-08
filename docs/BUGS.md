@@ -387,26 +387,19 @@ usage limit at the time.
 
 ## Repo / environment status (not code bugs, but blocking)
 
-### BUG-015 🔴 Zero git commits
-Working tree is fully untracked as of 2026-08-08. Nothing is checkpointed.
+### BUG-015 🟢 Fixed 2026-08-08 — Zero git commits
+Working tree was fully untracked at the start of the session. Fixed: the first commit landed
+the same day, and the branch this work lives on has 20+ commits since.
 
 ### BUG-016 🟢 No `.env` file
 Fixed 2026-08-08 — `.env` created with the required keys (`DATABASE_URL`,
 `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `PLAID_CLIENT_ID`, `PLAID_SECRET`,
 `PLAID_ENV`, `NEXT_PUBLIC_API_URL`), values left blank for the user to fill in.
 
-### BUG-017 🔴 Zero automated tests
-No test framework installed, no test files (excluding `node_modules`). See docs/PLAN.md for
-the setup + first-suite plan.
-
----
-
-## Priority 3 — test coverage gaps
-
-Tracked as work, not bugs: see docs/PLAN.md "Tier 3 — tests" for the specific test list
-(ownership tests for every write path, plus the two integrity tests for BUG-006/BUG-007).
-Any *new* bug a test uncovers gets appended here with the next BUG-0xx number, in the section
-that matches its priority.
+### BUG-017 🟢 Fixed 2026-08-08 — Zero automated tests
+No test framework was installed, no test files existed. Fixed: vitest installed, and the
+suite grew to 38 tests across 4 files over the session (ownership regression, amount/cents
+validation, Plaid mapping and sign-convention tests).
 
 ### BUG-021 🟢 Fixed 2026-08-08 — `@hono/clerk-auth` needs `CLERK_PUBLISHABLE_KEY`, a separate env var from the Next.js one
 **Verified by actually running `npm run dev` for the first time this session** (previously
@@ -430,7 +423,17 @@ request) — confirmed via the actual server log, not assumed. `/` and `/sign-in
 **Lesson:** `tsc`/`vitest`/`eslint` all passed the whole session while this was broken —
 none of them boot the actual Next.js server or exercise `@hono/clerk-auth`'s middleware.
 `npm run dev` should be checked at least once per session that touches auth-adjacent config,
-not assumed fine because the automated checks are green.
+not assumed fine because the automated checks are green. This is a runtime/auth-configuration
+bug, not a test-coverage gap -- filed here rather than under Priority 3 below.
+
+---
+
+## Priority 3 — test coverage gaps
+
+Tracked as work, not bugs: see docs/PLAN.md "Tier 3 — tests" for the specific test list
+(ownership tests for every write path, plus the two integrity tests for BUG-006/BUG-007).
+Any *new* bug a test uncovers gets appended here with the next BUG-0xx number, in the section
+that matches its priority.
 
 ---
 
@@ -440,14 +443,52 @@ not assumed fine because the automated checks are green.
   (`db/drizzle.ts:2`). Acceptable today because every write touches a single table; the day a
   delete needs to cascade across tables, this driver has to change.
 - **No caching layer.** No measured need for one yet.
+- **Migrations 0007 (`UNIQUE` on accounts/categories names, BUG-005) and 0008 (`item_id
+  NOT NULL` on `connected_banks`, BUG-013) assume the tables they alter are safe for that
+  constraint** — they were verified against *this* deployment's actual data before being
+  generated and applied (real duplicate names were found and merged before 0007; `connected_
+  banks` was confirmed empty before 0008), not backfilled generically. A migration is
+  immutable once applied, so those two files are not rewritten after the fact to handle
+  arbitrary other databases' existing data — if this schema is ever applied to a *different*
+  populated database, re-verify (or write a new backfill migration) before running them,
+  don't assume they're safe by default.
 
 ---
 
 ## Checked, not applicable to this repo
 
-- **"Stop returning `access_token` to the browser"** — the mentor's list raised this, but
-  `plaid.ts:76` already returns only `{ data: { connected: true } }`. The access token never
-  leaves the server. No action needed here — this item likely applies to a different project
-  in the same review batch (the mentor's notes referenced "SkyCode" and "AURUX" elsewhere).
 - **"404 not 403 on ownership failures"** — already the case throughout `accounts.ts` and
   `categories.ts` (e.g. `accounts.ts:165`, `categories.ts:165`). No action needed.
+
+## Correction to an earlier "not applicable" note
+
+- **"Stop returning `access_token` to the browser"** was originally marked "not applicable"
+  here, because the disconnected local scaffold this session started from (root commit
+  `5256ef0`, before the later reconciliation onto the real `origin/master`) already returned
+  only `{ data: { connected: true } }`. That was true for the local file at the time, but
+  **the real `origin/master`'s `/exchange-public-token` did leak the raw Plaid `access_token`
+  to the client** (`return c.json({ data: exchange.data.access_token }, 200)`). This surfaced
+  as a merge conflict while reconciling this branch onto the real base, and was fixed then
+  (`app/api/[[...route]]/plaid.ts`). Recorded here rather than silently editing the original
+  note, since the original claim actually was correct for what it was checking at the time —
+  the base just changed under it.
+
+---
+
+### BUG-022 🔴 Plaid-imported transaction dates may land on the wrong calendar day for non-UTC deployments
+**Verified** via CodeRabbit's automated PR review, cross-checked against `date-fns`/JS `Date`
+parsing semantics. `lib/plaid-mapping.ts`'s `mapPlaidTransaction` does
+`new Date(transaction.date)` on Plaid's `YYYY-MM-DD` date-only string — per the ECMAScript
+spec, a date-only ISO string parses as **UTC midnight**, not local midnight. `transactions.date`
+is a Postgres `timestamp` (no time zone). If the app or database session isn't in UTC, the
+calendar day read back out can be one day off from what Plaid reported.
+**Not fixed in this pass.** Two reasons: (1) the CSV import path
+(`app/(dashboard)/transactions/page.tsx`'s `parseCsvDate`) has the exact same
+`new Date(value)` pattern already, so fixing only the Plaid path would leave an inconsistency
+between the two import mechanisms rather than closing the gap; (2) a proper fix needs a
+decision that affects both paths together (e.g. always normalize date-only strings to a fixed
+local-noon instant, or store dates as `date`-only in Postgres instead of `timestamp`), not a
+one-line patch to `plaid-mapping.ts` alone.
+**Fix (when picked up):** decide the normalization strategy once, apply it to both
+`mapPlaidTransaction` and `parseCsvDate`, add a timezone-sensitive regression test (assert the
+calendar day survives a round-trip under a non-UTC `TZ`).

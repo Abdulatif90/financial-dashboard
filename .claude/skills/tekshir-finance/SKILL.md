@@ -83,7 +83,7 @@ Work may exist in three places — check all of them, not just git:
 ## Step 3 — Run the checks (verify, don't trust the commit message or the subagent's report)
 From the repo root:
 - `npm run test` (vitest — run once, not watch mode)
-- `npx tsc --noEmit`
+- `npx --no-install tsc --noEmit`
 - `npm run lint`
 
 Report the real numbers/output, not a summary that assumes success.

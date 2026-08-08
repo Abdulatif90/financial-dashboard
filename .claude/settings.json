@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx vitest run)",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npm run test)",
+      "Bash(npx --no-install tsc --noEmit)"
     ]
   }
 }

@@ -257,12 +257,17 @@ is mock-proven only — see "Next").
 3. CV/portfolio text update — outside this repo's scope, needs the user directly.
 
 ## Notes
-- `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root
-  commit, 2026-08-08). This is the "before" checkpoint Phase 2 fixes diff against.
+- **History note (2026-08-08, later in the session):** this branch was originally built as a
+  disconnected local history (root commit `5256ef0`, unrelated to the real GitHub repo). It
+  was later reconciled: rebuilt on top of the actual `origin/master` (root `ec2bea9`) so the
+  PR diff is sane instead of "delete the whole repo, add it back." `5256ef0` no longer exists
+  in this branch's history — if you see it referenced elsewhere in this file, it's describing
+  work from before the reconciliation, still accurate in substance, just not the literal
+  commit hash anymore.
 - `.env` is filled in with real values (DATABASE_URL, Clerk keys, Plaid keys,
-  NEXT_PUBLIC_API_URL). One thing worth the user's attention: `NEXT_PUBLIC_API_URL` is set to
-  the production Vercel URL, not `http://localhost:3000` — so `npm run dev` locally will call
-  the deployed production API, not the local one, until that's changed for local work.
+  NEXT_PUBLIC_API_URL). `NEXT_PUBLIC_API_URL` was originally set to the production Vercel URL
+  (meaning `npm run dev` would have called the deployed production API instead of the local
+  one) — **this has been fixed**; it's `http://localhost:3000` now.
 
 ## Open questions for the user
 - Confirm the mentor's raw list (mentioning "SkyCode" and "AURUX") was cross-project feedback

@@ -5,12 +5,14 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-007 fixed (money stored as cents). All of docs/BUGS.md Priority 1 and
-Priority 2 are now fixed.
+2026-08-08 — Phase 3 done: README.md Indexes/Security tables + "Key design decisions" section
+added, BUG-019 (`npm run lint`) and BUG-020 (`npm run db:seed`) fixed.
 
 ## Current phase
-**Phase 3 — Re-audit + README** is next (see docs/PLAN.md). Phase 0 (foundation), Phase 1
-(test infra), and Phase 2 (Priority 1 + Priority 2 bug fixes) are done.
+**Phase 3 — Re-audit + README** is done. What's left is the CV/portfolio text update
+("audited" -> "fixed") and the deferred Plaid gaps (BUG-009..BUG-014) — see "Next" below.
+Phase 0 (foundation), Phase 1 (test infra), and Phase 2 (Priority 1 + Priority 2 bug fixes)
+were already done coming into this session.
 
 ## Done
 - Full code audit against a mentor's prioritized review; verified each claim against the
@@ -93,22 +95,50 @@ Priority 2 are now fixed.
   stack (vitest/tsc/eslint, docs/BUGS.md + docs/PLAN.md instead of StudyMate's docs/).
   Named distinctly (not `tekshir`) to avoid ambiguity with the StudyMate skill of that name.
   Also checks uncommitted changes and subagent/Task-tool work, not just git commits.
+- **Phase 3 done**: added the "🗂 Indexes" and "🛡 Security" tables plus a "🧩 Key design
+  decisions" section to README.md, placed between the existing "🏗 Architecture" and
+  "⚙️ Installation" sections, matching the file's plain-line header style (no markdown `#`).
+  Every index row and every security-table row was verified against the current code (not
+  transcribed from docs/BUGS.md without checking) — read `db/schema.ts`, `accounts.ts`,
+  `categories.ts`, `transactions.ts`, `summary.ts`, `app.ts`, and `plaid.ts` directly.
+  "Key design decisions" covers money-as-cents (BUG-007, and why cents beat a `decimal`
+  column), the `neon-http` no-multi-statement-transactions trade-off, and the no-caching-layer
+  decision — the two items docs/BUGS.md's "Deliberately left open" section already documented.
+- **BUG-019 fixed**: `components/custom-tooltip.tsx`'s `any` prop replaced with
+  `Partial<TooltipContentProps<number, string>>` (Recharts' real type, type-only import);
+  `Partial` because the component is instantiated as `<CustomTooltip />` with no props in the
+  three chart variants (Recharts injects `active`/`payload` at render time via `cloneElement`).
+  The four `formSchema`-only-used-as-a-type warnings (`edit-account-sheet.tsx`,
+  `new-account-sheet.tsx`, `edit-category-sheet.tsx`, `new-category-sheet.tsx`) fixed by
+  dropping the unused runtime `const formSchema = ...` binding in each and deriving
+  `FormValues` directly as `Pick<z.input<typeof insertAccountSchema>, "name">` (or
+  `insertCategorySchema`) — the real validation already lives in `AccountForm`/`CategoryForm`,
+  which keep their own `formSchema` + `zodResolver`, so no runtime behavior changed.
+  `components/data-table.tsx`'s React Compiler warning and
+  `features/plaid/api/use-exchange-public-token.ts`'s unused `queryClient` were left as-is,
+  exactly as scoped (framework limitation and BUG-009 overlap, respectively).
+- **BUG-020 fixed**: `package.json`'s `db:seed` script changed from `ts-node scripts/seed.ts`
+  to `tsx scripts/seed.ts`. Not re-run in this session (code-only change, out of scope to
+  touch the live DB again here) — already verified working via `npx tsx scripts/seed.ts`
+  during the BUG-007 session.
+- Verified after all of the above: `npx tsc --noEmit` clean, `npx eslint .` → 0 errors / 2
+  warnings (the two explicitly left-as-is), `npx vitest run` → 14/14 passing.
 
 ## Not done yet
-- BUG-019 (found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings) in
-  files this session never touched — not fixed, out of scope
-- BUG-020 (found incidentally): `npm run db:seed` references `ts-node`, which isn't a
-  dependency (project uses `tsx` everywhere else) — not fixed, one-line fix, low priority
 - `npm run dev` not yet verified locally against real `.env` values
 - Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
   (Phase 2 of docs/PLAN.md treats these as lower priority than core money-tracking)
-- Phase 3 (README tables, "Key design decisions" section) not started
+- `components/data-table.tsx`'s React Compiler "incompatible library" warning
+  (`useReactTable()`) — deliberately left open, framework-level limitation, not a code bug
+- `features/plaid/api/use-exchange-public-token.ts`'s unused `queryClient` — deliberately left
+  open, tied to BUG-009's unfinished query-invalidation TODO (deferred Plaid work)
+- CV/portfolio text update from "audited" to "fixed" (docs/PLAN.md Phase 3's last item)
 
 ## Next
-Phase 3 per docs/PLAN.md: re-run the full suite (done, 14/14 pass), then add the
-Indexes/Security tables and "Key design decisions" section to README.md now that there's
-real, verified work to document — plus optionally BUG-019/BUG-020 (small, no live-data risk)
-and the deferred Plaid work (BUG-009..BUG-014).
+Phase 3 is complete. What's left, in priority order: (1) verify `npm run dev` locally against
+the real `.env` (note: `NEXT_PUBLIC_API_URL` currently points at the production Vercel URL,
+not localhost — see "Notes" below), (2) update CV/portfolio text from "audited" to "fixed",
+(3) optionally pick up the deferred Plaid work (BUG-009..BUG-014) if it becomes a priority.
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

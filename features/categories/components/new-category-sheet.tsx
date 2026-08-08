@@ -12,11 +12,10 @@ import {
 } from "@/components/ui/sheet"
 import { useCreateCategory } from "../api/use-create-category";
 
-const formSchema = insertCategorySchema.pick({
-    name: true,
-});
-
-type FormValues = z.input<typeof formSchema>;
+// Only the type is needed here -- CategoryForm owns the actual runtime schema/resolver -- so
+// this derives FormValues from insertCategorySchema's inferred input type instead of creating
+// an unused runtime `formSchema` binding (BUG-019).
+type FormValues = Pick<z.input<typeof insertCategorySchema>, "name">;
 
 export const NewCategorySheet = () => {
     const { isOpen, onClose } = useNewCategory();

@@ -1,14 +1,20 @@
 import { format } from "date-fns";
+import type { TooltipContentProps } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 
-export const CustomTooltip = ({ active, payload}: any) => {
+// Recharts clones this element and injects the tooltip props at render time, so none of
+// them are actually present on the `<CustomTooltip />` JSX in the chart components -- hence
+// `Partial<...>` rather than the (all-required) `TooltipContentProps` directly.
+type CustomTooltipProps = Partial<TooltipContentProps<number, string>>;
+
+export const CustomTooltip = ({ active, payload}: CustomTooltipProps) => {
     if( !active || !payload || payload.length === 0 ) {
         return null;
     }
     const date = payload[0].payload.date;
-    const income = payload[0].value;
-    const expenses = payload[1].value;
+    const income = Number(payload[0]?.value ?? 0);
+    const expenses = Number(payload[1]?.value ?? 0);
 
     return (
         <div className="bg-white p-3 rounded-md shadow-md border overflow-hidden" >

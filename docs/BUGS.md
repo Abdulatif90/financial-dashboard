@@ -76,22 +76,48 @@ table has real production volume, but there is no honest "420→270"-style numbe
 today — the dataset is too small for the index to change anything yet. Re-run this
 measurement once the table has thousands of rows.
 
-### BUG-019 🔴 `npm run lint` currently fails project-wide (pre-existing, unrelated to BUG-001..018)
+### BUG-019 🟢 Fixed 2026-08-08 — `npm run lint` currently fails project-wide (pre-existing, unrelated to BUG-001..018)
 **Verified**, found incidentally while confirming lint was clean after the BUG-003/BUG-004
 changes — `npx eslint .` reports 1 error (`@typescript-eslint/no-explicit-any` in
 `components/custom-tooltip.tsx:5`) and 6 warnings (an incompatible-library warning in
 `components/data-table.tsx`, four `formSchema` unused-as-value warnings in the
 account/category sheet components, one unused `queryClient` in
 `features/plaid/api/use-exchange-public-token.ts`) across files this session never touched.
-Not fixed here — out of scope for BUG-003/BUG-004, and touches several unrelated files.
-**Fix:** address each individually; the plaid one overlaps with BUG-009's TODO.
+**Fix applied:**
+- `components/custom-tooltip.tsx`: replaced the `any` prop type with
+  `Partial<TooltipContentProps<number, string>>` (Recharts' real tooltip-content prop type,
+  imported as a type-only import). `Partial` because `<CustomTooltip />` is written with no
+  props in `line-variant.tsx`/`bar-variant.tsx`/`aria-variant.tsx` — Recharts clones the
+  element and injects `active`/`payload`/etc. at render time, so the props can't be required
+  at JSX-creation time. `payload[0]`/`payload[1]`'s `.value` is `number | undefined` in the
+  real type (it wasn't checked at all under `any`), so those reads are now wrapped in
+  `Number(... ?? 0)`.
+- `edit-account-sheet.tsx` / `new-account-sheet.tsx` / `edit-category-sheet.tsx` /
+  `new-category-sheet.tsx`: each had a local `const formSchema = insert*Schema.pick({ name:
+  true })` used only for `z.input<typeof formSchema>` — the actual runtime validation happens
+  inside `AccountForm`/`CategoryForm`, which own their own `formSchema` + `zodResolver`. Removed
+  the unused runtime binding; `FormValues` is now derived directly as
+  `Pick<z.input<typeof insertAccountSchema>, "name">` (or `insertCategorySchema` for the
+  category sheets) — same type, no dead value.
+**Left as-is (explicitly out of scope, see task notes):**
+- `components/data-table.tsx`'s React Compiler "incompatible library" warning about
+  `useReactTable()` — framework-level limitation (TanStack Table's API isn't
+  compiler-memoizable), not a code bug.
+- `features/plaid/api/use-exchange-public-token.ts`'s unused `queryClient` — ties directly to
+  BUG-009's unfinished `onSuccess` TODO (query invalidation after bank connect), which is
+  deferred, lower-priority Plaid work. Fixing the warning without implementing invalidation
+  would just mean deleting the variable and losing the TODO's context.
+**Verified:** `npx eslint .` now reports 0 errors, 2 warnings (exactly the two left-as-is
+above). `npx tsc --noEmit` clean. `npx vitest run` still 14/14.
 
-### BUG-020 🔴 `npm run db:seed` is broken — `ts-node` isn't a dependency
+### BUG-020 🟢 Fixed 2026-08-08 — `npm run db:seed` is broken — `ts-node` isn't a dependency
 **Verified**, found incidentally while re-seeding for BUG-007. `package.json`'s
 `"db:seed": "ts-node scripts/seed.ts"` fails with `'ts-node' is not recognized` — the project
 uses `tsx` everywhere else (it's a devDependency; `ts-node` isn't). Worked around it for this
 session's re-seed by running `npx tsx scripts/seed.ts` directly.
-**Fix:** change the script to `"db:seed": "tsx scripts/seed.ts"`.
+**Fix applied:** changed the script to `"db:seed": "tsx scripts/seed.ts"` in `package.json`.
+Not re-run here (out of scope — this is a code-only change; the script was already verified
+working via `npx tsx scripts/seed.ts` during the BUG-007 session).
 
 ---
 

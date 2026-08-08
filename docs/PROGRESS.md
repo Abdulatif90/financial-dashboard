@@ -5,7 +5,8 @@ new session (or `/tekshir`) reads to resume without re-deriving context. See doc
 the sequencing and docs/BUGS.md for the full bug list.
 
 ## Last updated
-2026-08-08 — BUG-006, BUG-008, BUG-018 fixed; BUG-005 and BUG-007 blocked on a user decision
+2026-08-08 — BUG-005 fixed (user chose: merge duplicates); BUG-007 next, user chose: full
+cents migration
 
 ## Current phase
 **Phase 2 — Fix bugs, in priority order** (see docs/PLAN.md). Phase 0 (foundation) and Phase 1
@@ -61,39 +62,40 @@ the sequencing and docs/BUGS.md for the full bug list.
   succeeds, only usage throws) AND a smoke test against the **live dev DB** confirming
   `db.select().where()` and `` sql`...` `` still work correctly through the proxy (methods
   are `.bind()`ed to the real instance so `this` doesn't break).
-- **BUG-005 investigation found a live blocker**: checked the dev DB for existing duplicate
-  account/category names before adding the unique constraint (good instinct — a migration
-  against violating data would just fail) and found real duplicates already exist. Stopped
-  and documented rather than picking a merge strategy unilaterally.
-- Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002), `f430bff` (BUG-003/BUG-004) —
-  the BUG-006/BUG-008/BUG-018 fix is the next commit to land
+- **BUG-005 fixed**: found real pre-existing duplicate account/category names in the live DB
+  while checking before adding the unique constraint. Asked the user how to resolve it; they
+  chose merge. Merged 2 account groups + 5 category groups (canonical = row with the most
+  attached transactions), re-pointing `transactions` foreign keys inside atomic
+  `sql.transaction()` batches, verified zero duplicates remain. Added the
+  `UNIQUE (user_id, lower(trim(name)))` index to both tables
+  (`drizzle/0007_wild_supreme_intelligence.sql`, applied). `accounts.ts`/`categories.ts`
+  `POST /` now catches the unique-violation (code `23505`) and falls back to returning the
+  existing row. Verified with a throwaway script that the constraint actually rejects a
+  case/whitespace-insensitive duplicate.
+- Committed: `5256ef0` (initial), `aae89a9` (BUG-001/BUG-002), `f430bff` (BUG-003/BUG-004),
+  `3cbdbf8` (BUG-006/BUG-008/BUG-018) — the BUG-005 fix is the next commit to land
 - `.claude/skills/tekshir-finance/SKILL.md` created (invoke as `/tekshir-finance`) —
   project-scoped overseer workflow, adapted from the StudyMate `tekshir` skill to this repo's
   stack (vitest/tsc/eslint, docs/BUGS.md + docs/PLAN.md instead of StudyMate's docs/).
   Named distinctly (not `tekshir`) to avoid ambiguity with the StudyMate skill of that name.
   Also checks uncommitted changes and subagent/Task-tool work, not just git commits.
 
-## Not done yet — two Priority 2 items are blocked, need the user to decide
-- **BUG-005 (unique constraint) is blocked**: the live dev DB already has real duplicate
-  account/category names for one user (found while checking before adding the constraint —
-  see docs/BUGS.md BUG-005 for the exact rows). A unique index migration will fail against
-  existing violations. Fixing this means merging or renaming those duplicates first, which
-  deletes rows and rewires `transactions` foreign keys — **not done without the user picking
-  an approach** (merge into a canonical row vs. rename in place).
-- **BUG-007 (money as cents) not started**: same category of concern — the live DB already
-  has ~90 real transaction rows stored as whole-dollar integers. Converting the semantic
-  meaning to cents requires either a one-time `UPDATE ... SET amount = amount * 100` against
-  live data, or a more careful expand-contract with a second column. Either mutates real
-  stored financial values — **flagging before touching it, not assuming "davom et" covers
-  mutating stored money values.**
+## Not done yet
+- **BUG-007 (money as cents)**: user picked "full migration" — multiply live `amount` values
+  by 100, update schema/validation/frontend/seed to work in cents. Not started yet, about to
+  begin. Same live-data caution as BUG-005 applies: back up/verify before mutating, confirm
+  reversibility.
 - BUG-019 (found incidentally): `npm run lint` fails project-wide (1 error, 6 warnings) in
   files this session never touched — not fixed, out of scope
 - `npm run dev` not yet verified locally against real `.env` values
 - Plaid gaps (BUG-009..BUG-013), BUG-014 (PLAID_ENV docs mismatch) — deferred, lower priority
 
 ## Next
-Waiting on the user for BUG-005 and BUG-007 (see above). Everything else fixable without
-touching live data is done through BUG-018.
+BUG-007: multiply the ~90 live transaction rows' `amount` by 100, then update
+`components/amount-input.tsx`/`features/transactions/components/transaction-form.tsx`
+(dollars-to-cents conversion on submit), `lib/utils.ts` `formatCurrency` (cents-to-dollars on
+display), `db/schema.ts` validation (reject non-integer amounts reaching the DB), and
+`scripts/seed.ts` (generate cents, not dollars, so future seeds match).
 
 ## Notes
 - `git log`: `5256ef0` — "Initial commit: finance dashboard scaffold + audit tooling" (root

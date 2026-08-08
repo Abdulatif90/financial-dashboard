@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "accounts_user_id_name_unique_idx" ON "accounts" USING btree ("user_id",lower(trim("name")));--> statement-breakpoint
+CREATE UNIQUE INDEX "categories_user_id_name_unique_idx" ON "categories" USING btree ("user_id",lower(trim("name")));

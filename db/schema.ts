@@ -4,9 +4,10 @@ import {
     integer,
     pgTable,
     text,
-    timestamp } from "drizzle-orm/pg-core";
+    timestamp,
+    uniqueIndex } from "drizzle-orm/pg-core";
 
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { z } from "zod";
 
 const nullableText = z.preprocess(
@@ -28,6 +29,8 @@ export const accounts = pgTable("accounts", {
     userId: text("user_id").notNull(),
 }, (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // BUG-005: the app-level check-then-insert had a race; the DB is the source of truth now.
+    uniqueIndex("accounts_user_id_name_unique_idx").on(table.userId, sql`lower(trim(${table.name}))`),
 ]);
 
 export const accountsRelations = relations(accounts, ({ many }) => ({
@@ -44,6 +47,8 @@ export const categories = pgTable("categories", {
     userId: text("user_id").notNull(),
 }, (table) => [
     index("categories_user_id_idx").on(table.userId),
+    // BUG-005: the app-level check-then-insert had a race; the DB is the source of truth now.
+    uniqueIndex("categories_user_id_name_unique_idx").on(table.userId, sql`lower(trim(${table.name}))`),
 ]);
 
 export const categoriesRelations = relations(categories, ({ many }) => ({

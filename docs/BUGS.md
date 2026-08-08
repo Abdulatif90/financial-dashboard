@@ -90,7 +90,7 @@ Not fixed here — out of scope for BUG-003/BUG-004, and touches several unrelat
 
 ## Priority 2
 
-### BUG-005 🔴 Duplicate-name race on accounts/categories — BLOCKED, needs a decision
+### BUG-005 🟢 Fixed 2026-08-08 — Duplicate-name race on accounts/categories
 **Verified, and worse than expected: this has already happened in production**, not just a
 theoretical race. `accounts.ts` and `categories.ts` do an app-level `select`
 (case-insensitive, trimmed match) then `insert` — classic check-then-act. Two concurrent
@@ -110,12 +110,22 @@ existing duplicates before the constraint can be added:
 2. Or: rename the duplicates (e.g. append a suffix) instead of merging, preserving all rows
    and their transaction history as-is, then add the unique index.
 
-Both mutate/delete real stored rows and rewire foreign keys — **not attempted without the
-user's go-ahead on which approach they want.**
-**Fix (once unblocked):** add a DB-level `UNIQUE (user_id, lower(trim(name)))` constraint via
-`uniqueIndex` in `db/schema.ts`; wrap the `POST /` insert in accounts.ts/categories.ts in a
-try/catch for the unique-violation (Postgres code `23505`) and fall back to returning the
-existing row, preserving the current idempotent-create UX instead of 500ing on the race.
+**User chose: merge.** Ran a script that grouped duplicates by `(user_id, lower(trim(name)))`,
+picked the row with the most attached transactions as canonical per group (ties broken by
+`id`), re-pointed every `transactions.account_id`/`category_id` referencing a duplicate onto
+the canonical row inside a `sql.transaction([...])` batch per row (atomic update+delete),
+then deleted the duplicates. Verified zero duplicates remain afterward. Merged: 2 account
+groups ("Savings Account", "Cash Wallet"), 5 category groups ("Transfer", "Rent", "Interest",
+"Education", "Gift") — all for one user, all real data, all pre-existing before this session.
+
+**Fix applied:** added a DB-level `UNIQUE (user_id, lower(trim(name)))` constraint via
+`uniqueIndex` in `db/schema.ts` for both tables (`drizzle/0007_wild_supreme_intelligence.sql`,
+applied to the live DB). `accounts.ts`/`categories.ts`'s `POST /` now wraps the insert in a
+try/catch: on a genuine race (Postgres error code `23505`), it re-queries and returns the
+existing row instead of 500ing — same idempotent-create UX as the pre-check path, just backed
+by a real constraint instead of a racy select-then-insert.
+**Verified:** a throwaway script confirmed the index rejects a case/whitespace-insensitive
+duplicate (`"Duplicate Test"` vs `"  duplicate test  "`) with exactly error code `23505`.
 
 ### BUG-006 🟢 Fixed 2026-08-08 — Date-range filter drops same-day transactions after midnight
 **Verified.** `GET /api/transactions` (`transactions.ts`) parsed `to` with

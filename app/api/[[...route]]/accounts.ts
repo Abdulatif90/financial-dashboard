@@ -90,14 +90,39 @@ const app = new Hono()
             return c.json({ data: existingAccount });
           }
 
-          const [data] = await db.insert(accounts).values({
-            id: createId(),
-            userId: auth.userId,
-            name: values.name.trim(),
-          })
-          .returning();
+          try {
+            const [data] = await db.insert(accounts).values({
+              id: createId(),
+              userId: auth.userId,
+              name: values.name.trim(),
+            })
+            .returning();
 
-          return c.json({ data })
+            return c.json({ data })
+          } catch (error) {
+            // BUG-005: the select-then-insert above has a race -- two concurrent requests
+            // can both miss the pre-check. The DB-level unique index (accounts_user_id_name_
+            // unique_idx) is the actual guard; on a genuine race, fall back to the same
+            // "return the existing row" behavior as the pre-check, instead of a 500.
+            if ((error as { code?: string }).code === "23505") {
+              const [raceWinner] = await db
+                .select()
+                .from(accounts)
+                .where(
+                  and(
+                    eq(accounts.userId, auth.userId),
+                    sql`lower(trim(${accounts.name})) = ${normalizedName}`
+                  )
+                )
+                .limit(1);
+
+              if (raceWinner) {
+                return c.json({ data: raceWinner });
+              }
+            }
+
+            throw error;
+          }
         }
     )
     .post(
